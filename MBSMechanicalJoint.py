@@ -1,0 +1,528 @@
+from msilib.schema import Property
+
+import numpy as np
+
+
+from MultiBodySimulation.MBSBody import MBSRigidBody3D
+
+class _MBSLink3D:
+    def __init__(self,
+                    body1  : MBSRigidBody3D,
+                    global_point1 : np.ndarray,
+                    body2  : MBSRigidBody3D,
+                    global_point2 : np.ndarray,
+                    stiffness : (np.ndarray, float) = None,
+                    damping : (np.ndarray, float) = None,
+                    angular_stiffness : (np.ndarray, float) = None,
+                    angular_damping : (np.ndarray, float) = None,
+                    linear_reaction = True,
+                    has_freegap = False,
+                    kinematic_link = False):
+        if stiffness is None and damping is None and  angular_stiffness is None and angular_damping is None:
+            raise ValueError("All stiffness and damping values (translation or rotations) can't be None")
+
+        self._linear_reaction = linear_reaction
+        self._freegap = has_freegap
+        self._kinematic_link = kinematic_link
+
+        self.__body1 = body1
+        self.__body2 = body2
+
+        self.__global_point1 = np.array(global_point1)
+        self.__global_point2 = np.array(global_point2)
+
+        if self.__global_point1.shape != (3,) or self.__global_point2.shape != (3,):
+            raise ValueError("Attachment points must be 3D vectors")
+
+        self.__K = np.zeros((3,3))
+        self.__C = np.zeros((3, 3))
+        self.__K_theta = np.zeros((3, 3))
+        self.__C_theta = np.zeros((3, 3))
+
+        self._init_structural_stiffness(stiffness, damping, angular_stiffness, angular_damping)
+
+        self._TransGap_vector = None
+        self._RotGap_vector = None
+
+    @property
+    def GetBody1(self):
+        return self.__body1
+
+    @property
+    def GetBody2(self):
+        return self.__body2
+
+    @property
+    def GetGlobalPoint1(self):
+        return self.__global_point1
+
+    @property
+    def GetGlobalPoint2(self):
+        return self.__global_point2
+
+
+    @property
+    def HasGap(self):
+        return self._freegap
+
+    @property
+    def GetTransGap(self):
+        return self._TransGap_vector
+
+    @property
+    def GetRotGap(self):
+        return self._RotGap_vector
+
+
+    @property
+    def IsLinear(self):
+        return self._linear_reaction
+
+
+    @property
+    def IsKinematic(self):
+        return self._kinematic_link
+
+    @property
+    def GetLinearReactionMatrices(self):
+        return self.__K, self.__C, self.__K_theta, self.__C_theta
+
+    def _init_structural_stiffness(self, stiffness, damping, angular_stiffness, angular_damping):
+
+        if stiffness is None:
+            stiffness = 0.0
+
+        if isinstance(stiffness, (float, int)):
+            self.__K = np.eye(3) * float(stiffness)
+        else:
+            self.__K = np.array(stiffness)
+            if self.__K.shape == (3,):
+                self.__K = np.eye(3) * self.__K
+            elif self.__K.shape != (3, 3):
+                raise ValueError("Stiffness must be scalar, 3 element array or 3x3 array")
+
+        if damping is None:
+            damping = 0.0
+
+        if isinstance(damping, (float, int)):
+            self.__C = np.eye(3) * float(damping)
+        else:
+            self.__C = np.array(damping)
+            if self.__C.shape == (3,):
+                self.__C = np.eye(3) * self.__C
+            elif self.__C.shape != (3, 3):
+                raise ValueError("Damping must be scalar, 3 element array or 3x3 array")
+
+        if angular_stiffness is None:
+            angular_stiffness = 0.
+
+        if isinstance(angular_stiffness, (float, int)):
+            self.__K_theta = np.eye(3) * float(angular_stiffness)
+        else:
+            self.__K_theta = np.asarray(angular_stiffness)
+            if self.__K_theta.shape == (3,):
+                self.__K_theta = np.eye(3) * self.__K_theta
+            elif self.__K_theta.shape != (3, 3):
+                raise ValueError("Angular stiffness must be scalar, 3 element array or 3x3 array")
+
+        if angular_damping is None:
+            angular_damping = 0.
+
+        if isinstance(angular_damping, (float, int)):
+            self.__C_theta = np.eye(3) * float(angular_damping)
+        else:
+            self.__C_theta = np.array(angular_damping)
+            if self.__C_theta.shape == (3,):
+                self.__C_theta = np.eye(3) * self.__C_theta
+            elif self.__C_theta.shape != (3, 3):
+                raise ValueError("Angular damping must be scalar, 3 element array or 3x3 array")
+
+
+    def _check_gap_values(self, Tx, name=""):
+        error_mess = f"Incorrect hard stop value in direction ({name}) : needs float/int or 2-values tuple of float / int"
+        if Tx is None :
+            return 0.0, (-np.inf, np.inf)
+        elif isinstance(Tx, (float,int)):
+            return 1.0, (-Tx, Tx)
+        elif isinstance(Tx, (tuple, list)):
+            if len(Tx) == 2 and all(isinstance(tx, (float, int)) for tx in Tx) :
+                return 1.0, (min(Tx), max(Tx))
+            else :
+                raise ValueError(error_mess)
+        else :
+            raise ValueError(error_mess)
+
+    def GetLinearLocalReactions(self, U1, V1, U2, V2):
+        dp = U2[:3] - U1[:3]
+        dv = V2[:3] - V1[:3]
+        angle_axis = U2[3:] - U1[3:]
+        omega_rel = V2[3:] - V1[3:]
+
+        # Force de ressort + amortisseur
+        if self.__K is not None or self.__C is not None:
+            force = self.__K @ dp + self.__C @ dv  # Vers body2
+        else :
+            force = np.zeros(3)
+
+        # Couple des liaisons angulaires
+        if self.__K_theta is not None or self.__C_theta is not None:
+            # Calcul du moment (torque) de ressort et d'amortissement angulaire
+            torque_rot = self.__K_theta @ angle_axis + self.__C_theta @ omega_rel
+        else :
+            torque_rot = np.zeros(3)
+
+        return force, torque_rot
+
+    def GetNonLinearLocalReactions(self, U1, V1, U2, V2):
+        return np.zeros(3), np.zeros(3)
+
+
+class MBSLinkLinearSpringDamper(_MBSLink3D) :
+
+    def __init__(self,
+        body1: MBSRigidBody3D,
+        global_point1: np.ndarray,
+        body2: MBSRigidBody3D,
+        global_point2: np.ndarray,
+        stiffness: (np.ndarray, float) = None,
+        damping: (np.ndarray, float) = None,
+        angular_stiffness: (np.ndarray, float) = None,
+        angular_damping: (np.ndarray, float) = None,):
+
+
+        super().__init__(body1,
+                        global_point1,
+                        body2,
+                        global_point2,
+                        stiffness,
+                        damping,
+                        angular_stiffness,
+                        angular_damping,
+                       linear_reaction=True,
+                       has_freegap=False,
+                       kinematic_link=False
+                       )
+
+class MBSLinkKinematic(_MBSLink3D):
+
+    def __init__(self,
+                        body1: MBSRigidBody3D, global_point1: np.ndarray,
+                        body2: MBSRigidBody3D, global_point2: np.ndarray,
+                        Tx : int=0.,
+                        Ty : int=0.,
+                        Tz : int=0.,
+                        Rx : int=0.,
+                        Ry : int=0.,
+                        Rz : int=0.,
+                        kinematic_tolerance=1e-4,
+                 ):
+        self.__kinematicConstraints = np.array([Tx, Ty, Tz, Rx, Rx, Rz])
+
+        if (self.__kinematicConstraints != 0 & self.__kinematicConstraints != 1).any() :
+            raise ValueError("Kinematic contraints (Tx, Ty, Tz, Rx, Rx, Rz) must be 0 or +1")
+
+        M = max(body1.mass, body2.mass)
+        Jm = max(np.max(body1.inertia), np.max(body2.inertia))
+        k = M / kinematic_tolerance
+        c = 2 * np.sqrt(k * M)
+        ktheta = Jm / (2 * np.pi * kinematic_tolerance)
+        ctheta = 2 * np.sqrt(ktheta * Jm)
+
+        Kmat = np.diag([Tx, Ty, Tz]) * k
+        Cmat = np.diag([Tx, Ty, Tz]) * c
+        Ktheta_mat = np.diag([Rx, Ry, Rz]) * ktheta
+        Ctheta_mat = np.diag([Rx, Ry, Rz]) * ctheta
+
+        super().__init__(body1,
+                         global_point1,
+                         body2,
+                         global_point2,
+                         Kmat,
+                         Cmat,
+                         Ktheta_mat,
+                         Ctheta_mat,
+                         linear_reaction=True,
+                         has_freegap=False,
+                         kinematic_link=True
+                         )
+
+        self.__translationFriction = None
+        self.__rotationFriction = None
+
+    @property
+    def GetTransConstraints(self):
+        return self.__kinematicConstraints[:3]
+
+    @property
+    def GetRotConstraints(self):
+        return self.__kinematicConstraints[:3]
+
+    def SetTransFriction(self, normalInitialContactForces: float = 0.,
+                         frictionCoefficient: float = 0.2,
+                         relativeSpeedRegulationScale: float = 1e-3,
+                         normalProjectionMatrix : np.ndarray = None):
+        """
+        Ajoute un frottement aux translations
+
+        :param:
+
+        - normalInitialContactForces : force normale initiale (corps 2 >>> corps 1) noté Fn_init;
+        - frictionCoefficient : coefficient de frottement noté µ;
+        - relativeSpeedRegulationScale : vitesse pour lissage de la loi de Coulomb noté vs;
+        - normalProjectionMatrix : matrice de projection pour les efforts normaux notés P >> Fn = P @ F;
+
+        Pour un frottement sur une direction normale n, utilisez P = n . n^T
+        Si P la matrice P est None :
+         - P = diag(Tx,Ty,Tz) ==> translations bloquées
+
+        Définition de la loi  :
+        Les efforts sont définis pour corps 2 >>> corps 1
+
+        La matrice de projection tangentielle Q = id - P
+        Efforts de réactions locales de contact normaux
+        Fn_reac = norm( P @ ( K dX + X dV ) )
+
+        Efforts normaux
+        Fn = Fn_reac + Fn_init
+
+        vitesse tangentielle
+        v = Q @ dv
+
+        Efforts locaux de frottement tangents
+        Ft = µ * Fn * tanh(norm(v) / vs) * direction
+
+        avec ct un damping pour hautes fréquences.
+
+        """
+        if normalProjectionMatrix is None :
+            normalProjectionMatrix = np.diag(self.__kinematicConstraints[:3])
+
+        tangentialProjectMatrix = np.eye(3) - normalProjectionMatrix
+
+        self.__translationFriction = [normalInitialContactForces,
+                                      frictionCoefficient,
+                                      relativeSpeedRegulationScale,
+                                      normalProjectionMatrix,
+                                      tangentialProjectMatrix]
+        self.__linear_reaction = False
+
+    def SetRotationalFriction(self, rotationRadius : float,
+                              normalInitialContactForces: float = 0.,
+                              frictionCoefficient: float = 0.2,
+                              relativeOmegaRegulationScale: float = 1e-3,
+                              normalProjectionMatrix: np.ndarray = None):
+        """
+        Ajoute un frottement aux translations
+
+        :param:
+
+        - rotationRadius : rayon interne de la liaison
+        - normalInitialContactForces : force normale initiale (corps 2 >>> corps 1) noté Fn_init;
+        - frictionCoefficient : coefficient de frottement noté µ;
+        - relativeOmegaRegulationScale : vitesse angulaire pour lissage de la loi de Coulomb noté ws;
+        - normalProjectionMatrix : matrice de projection pour des efforts notés P;
+
+        Pour un frottement sur une direction normale n, utilisez P = n . n^T
+        Si la matrice de projection est None :
+            - P = diag(Tx,Ty,Tz) ==> translations bloquées
+        La matrice de projection tangentielle est Q = Qrot = Ptrans = P
+
+        Définition de la loi  :
+        Les efforts sont définis pour corps 2 >>> corps 1
+        Efforts de réactions locales de contact normaux
+        Fn_reac = norm( P @ ( K dX + C dV ) )
+
+        Efforts normaux
+        Fn = Fn_reac + Fn_init
+
+        Vitesse tangentielle
+        w = P @ omega = Q @ omega
+
+
+        Couple de frottement
+        Tf = µ * r * Fn * tanh(norm(w) / ws) * direction(w)
+
+        avec ct un damping pour hautes fréquences.
+
+        """
+
+        if normalProjectionMatrix is None :
+            normalProjectionMatrix = np.diag(self.__kinematicConstraints[:3])
+
+
+        self.__rotationFriction = [rotationRadius,
+                                   normalInitialContactForces,
+                                   frictionCoefficient,
+                                   relativeOmegaRegulationScale,
+                                   normalProjectionMatrix]
+        self.__linear_reaction = False
+
+    def GetNonLinearLocalReactions(self, U1, V1, U2, V2):
+        if self.__rotationFriction is None and self.__translationFriction is None :
+            # Dans les faits ce cas n'arrivera pas
+            return np.zeros(3), np.zeros(3)
+        dp = U2[:3] - U1[:3]
+        dv = V2[:3] - V1[:3]
+        omega_rel = V2[3:] - V1[3:]
+
+        # Force de ressort + amortisseur
+        if self.K is not None or self.C is not None:
+            force = self.__K @ dp + self.__C @ dv  # Vers body2
+        else:
+            force = np.zeros(3)
+
+        Ft = np.zeros(3)
+        if self.__translationFriction is not None :
+            (Fn_init,
+             µ,
+             vs,
+             P,
+             Q) = self.__translationFriction
+
+            vt = Q @ dv
+            v_norm = np.linalg.norm(vt)
+            if v_norm > 1e-12:
+                direction = vt / v_norm
+            else:
+                direction = np.zeros_like(vt)
+
+            ct = 1e-3 * Fn_init / vs
+
+
+            Fn_reac = np.linalg.norm( P @ force )
+            Fn_tot = (Fn_init + Fn_reac)
+
+            ct = 1e-3 * Fn_tot * µ / vs
+            fvs = np.tanh(v_norm / vs)
+            Ft = - Fn_tot * µ * fvs * direction + vt * ct
+
+        Tf = np.zeros(3)
+        if self.__rotationFriction is not None :
+            (r,
+             Fn_init,
+             µ,
+             ws,
+             P) = self.__rotationFriction
+
+            wt = P @ omega_rel
+            w_norm = np.linalg.norm(wt)
+            if w_norm > 1e-12:
+                direction = wt / w_norm
+            else:
+                direction = np.zeros_like(wt)
+
+            Fn_reac = np.linalg.norm( P @ force )
+            Fn_tot = (Fn_init + Fn_reac)
+
+            ct = 1e-3 * Fn_tot * r * µ / ws
+            fws = np.tanh(w_norm/ws)
+            Tf = - Fn_tot * r * µ * fws * direction + wt * ct
+
+        return Ft, Tf
+
+
+
+
+
+class MBSLinkHardStop(_MBSLink3D) :
+    def __init__(self, body1: MBSRigidBody3D, global_point1: np.ndarray,
+                 body2: MBSRigidBody3D, global_point2: np.ndarray,
+                 Tx_gap=None,
+                 Ty_gap=None,
+                 Tz_gap=None,
+                 Rx_gap=None,
+                 Ry_gap=None,
+                 Rz_gap=None,
+                 penetration_tolerance=1e-4,
+                 ):
+
+        super().__init__(body1,
+                         global_point1,
+                         body2,
+                         global_point2,
+                         0,
+                         0,
+                         0,
+                         0,
+                         linear_reaction=True,
+                         has_freegap=True,
+                         kinematic_link=False
+                         )
+
+
+
+        M = max(body1._mass, body2._mass)
+        Jm = max(np.max(body1._inertia), np.max(body2._inertia))
+        k = M / penetration_tolerance
+        c = 2 * np.sqrt(k * M)
+        ktheta = Jm / (2 * np.pi * penetration_tolerance)
+        ctheta = 2 * np.sqrt(ktheta * Jm)
+
+
+        Tx, Tx_gap = self._check_gap_values(Tx_gap, "X")
+        Ty, Ty_gap = self._check_gap_values(Ty_gap, "Y")
+        Tz, Tz_gap = self._check_gap_values(Tz_gap, "Z")
+        Rx, Rx_gap = self._check_gap_values(Rx_gap, "thetaX")
+        Ry, Ry_gap = self._check_gap_values(Ry_gap, "thetaY")
+        Rz, Rz_gap = self._check_gap_values(Rz_gap, "thetaZ")
+
+        Kmat = np.diag([Tx, Ty, Tz]) * k
+        Cmat = np.diag([Tx, Ty, Tz]) * c
+        Ktheta_mat = np.diag([Rx, Ry, Rz]) * ktheta
+        Ctheta_mat = np.diag([Rx, Ry, Rz]) * ctheta
+
+
+        self._init_structural_stiffness(Kmat,Cmat,Ktheta_mat, Ctheta_mat)
+
+
+        self._TransGap_vector = np.array([Tx_gap, Ty_gap, Tz_gap])
+        self._RotGap_vector = np.array([Rx_gap, Ry_gap, Rz_gap])
+
+
+
+class MBSLinkSmoothLinearStop(_MBSLink3D) :
+    def __init__(self, body1: MBSRigidBody3D, global_point1: np.ndarray,
+                 body2: MBSRigidBody3D, global_point2: np.ndarray,
+                 stiffness,
+                 damping,
+                 angular_stiffness,
+                 angular_damping,
+                 Tx_gap=None,
+                 Ty_gap=None,
+                 Tz_gap=None,
+                 Rx_gap=None,
+                 Ry_gap=None,
+                 Rz_gap=None,
+                 ):
+        super().__init__(body1,
+                         global_point1,
+                         body2,
+                         global_point2,
+                         stiffness,
+                         damping,
+                         angular_stiffness,
+                         angular_damping,
+                         linear_reaction=True,
+                         has_freegap=True,
+                         kinematic_link=False
+                         )
+
+
+        Tx, Tx_gap = self._check_gap_values(Tx_gap, "X")
+        Ty, Ty_gap = self._check_gap_values(Ty_gap, "Y")
+        Tz, Tz_gap = self._check_gap_values(Tz_gap, "Z")
+        Rx, Rx_gap = self._check_gap_values(Rx_gap, "thetaX")
+        Ry, Ry_gap = self._check_gap_values(Ry_gap, "thetaY")
+        Rz, Rz_gap = self._check_gap_values(Rz_gap, "thetaZ")
+
+
+
+
+        self._TransGap_vector = np.array([Tx_gap, Ty_gap, Tz_gap])
+        self._RotGap_vector = np.array([Rx_gap, Ry_gap, Rz_gap])
+
+
+        self.__K = np.diag([Tx, Ty, Tz]) * self.__K
+        self.__C = np.diag([Tx, Ty, Tz]) * self.__C
+        self.__K_theta = np.diag([Rx, Ry, Rz]) * self.__K_theta
+        self.__C_theta = np.diag([Rx, Ry, Rz]) * self.__C_theta

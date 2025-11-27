@@ -1,5 +1,7 @@
+from msilib.schema import Property
+
 import numpy as np
-from MBS_numerics import RotationMatrix
+from MultiBodySimulation.MBS_numerics import RotationMatrix
 
 class MBSRigidBody3D:
     def __init__(self, name : str, mass : float, inertia_tensor : float | np.ndarray):
@@ -44,6 +46,10 @@ class MBSRigidBody3D:
     def IsFixed(self):
         return self._is_fixed
 
+    @property
+    def GetName(self):
+        return self._name
+
     def GetPos(self):
         return self._position
 
@@ -58,8 +64,8 @@ class MBSRigidBody3D:
         if position.shape != (3,):
             raise ValueError("Position vector must be shape (3,)")
 
-        self._position = position
-        self._initial_position = position
+        self._position = position.copy()
+        self._initial_position = position.copy()
 
     def SetAngle(self, angle : np.ndarray):
         """
@@ -69,8 +75,8 @@ class MBSRigidBody3D:
         if angle.shape != (3,):
             raise ValueError("Angle vector must be shape (3,)")
 
-        self._angles = angle
-        self._initial_angles = angle
+        self._angles = angle.copy()
+        self._initial_angles = angle.copy()
 
     def ChangeInitialPosition(self, position : np.ndarray):
         """
@@ -80,7 +86,7 @@ class MBSRigidBody3D:
         if position.shape != (3,):
             raise ValueError("Position vector must be shape (3,)")
 
-        self._initial_position = position
+        self._initial_position = position.copy()
 
     def ChangeInitialAngle(self, angle : np.ndarray):
         """
@@ -90,7 +96,7 @@ class MBSRigidBody3D:
         if angle.shape != (3,):
             raise ValueError("Angle vector must be shape (3,)")
 
-        self._initial_angles = angle
+        self._initial_angles = angle.copy()
 
 
 
@@ -145,9 +151,9 @@ class MBSReferenceBody3D(MBSRigidBody3D) :
         self.__dY_func = self.__zero_func
         self.__dZ_func = self.__zero_func
 
-        self.__thetaX_func = self.__zero_func
-        self.__thetaY_func = self.__zero_func
-        self.__thetaZ_func = self.__zero_func
+        self.__dthetaX_func = self.__zero_func
+        self.__dthetaY_func = self.__zero_func
+        self.__dthetaZ_func = self.__zero_func
 
         self.__VX_func = self.__zero_func
         self.__VY_func = self.__zero_func
@@ -157,21 +163,22 @@ class MBSReferenceBody3D(MBSRigidBody3D) :
         self._omegaY_func = self.__zero_func
         self._omegaZ_func = self.__zero_func
 
+
     def SetDisplacementFunction(self,
                                  dx_func=None,
                                  dy_func=None,
                                  dz_func=None):
         dh = 1e-9
         if dx_func is not None :
-            self.__X_func = dx_func
+            self.__dX_func = dx_func
             self.__VX_func = lambda t : (dx_func(t+dh) - dx_func(t-dh) ) / (2*dh)
 
         if dy_func is not None :
-            self.__Y_func = dy_func
+            self.__dY_func = dy_func
             self.__VY_func = lambda t : (dy_func(t+dh) - dy_func(t-dh) ) / (2*dh)
 
         if dz_func is not None :
-            self.__Z_func = dz_func
+            self.__dZ_func = dz_func
             self.__VZ_func = lambda t : (dz_func(t+dh) - dz_func(t-dh) ) / (2*dh)
 
 
@@ -192,18 +199,35 @@ class MBSReferenceBody3D(MBSRigidBody3D) :
             self._omegaZ_func = lambda t : (dtheta_z_func(t+dh) - dtheta_z_func(t-dh) ) / (2*dh)
 
 
+    def _updateDisplacement(self,t):
+
+        return np.array([
+            self.__dX_func(t),
+            self.__dY_func(t),
+            self.__dZ_func(t),
+            self.__dthetaX_func(t),
+            self.__dthetaY_func(t),
+            self.__dthetaZ_func(t),
+            self.__VX_func(t),
+            self.__VY_func(t),
+            self.__VZ_func(t),
+            self._omegaX_func(t),
+            self._omegaY_func(t),
+            self._omegaZ_func(t)
+        ])
+
     def _updateMotion(self, t):
-        self._position = np.array([self.__X_func(t),
-                                  self.__Y_func(t),
-                                  self.__Z_func(t)]) + self._initial_position
+        self._position = np.array([self.__dX_func(t),
+                                  self.__dY_func(t),
+                                  self.__dZ_func(t)]) + self._initial_position
 
         self._velocity = np.array([self.__VX_func(t),
                                   self.__VY_func(t),
                                   self.__VZ_func(t)])
 
-        self._theta = np.array([self.__thetaX_func(t) ,
-                               self.__thetaY_func(t) ,
-                               self.__thetaZ_func(t) ]) + self._initial_angles
+        self._theta = np.array([self.__dthetaX_func(t) ,
+                               self.__dthetaY_func(t) ,
+                               self.__dthetaZ_func(t) ]) + self._initial_angles
 
         self._omega = np.array([self._omegaX_func(t),
                                self._omegaY_func(t),
