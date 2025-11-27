@@ -28,11 +28,16 @@ class _MBSLink3D:
         self.__body1 = body1
         self.__body2 = body2
 
-        self.__global_point1 = np.array(global_point1)
-        self.__global_point2 = np.array(global_point2)
 
-        if self.__global_point1.shape != (3,) or self.__global_point2.shape != (3,):
+        global_point1 = np.asarray(global_point1)
+        global_point2 = np.asarray(global_point2)
+        if global_point1.shape != (3,) or global_point2.shape != (3,):
             raise ValueError("Attachment points must be 3D vectors")
+
+
+        self.__local_point1 = body1.GetBodyLocalCoords(global_point1)
+        self.__local_point2 = body1.GetBodyLocalCoords(global_point2)
+
 
         self._K = np.zeros((3,3))
         self._C = np.zeros((3, 3))
@@ -54,11 +59,11 @@ class _MBSLink3D:
 
     @property
     def GetGlobalPoint1(self):
-        return self.__global_point1
+        return self.__body1.GetBodyGlobalCoords(self.__local_point1)
 
     @property
     def GetGlobalPoint2(self):
-        return self.__global_point2
+        return self.__body2.GetBodyGlobalCoords(self.__local_point2)
 
 
     @property

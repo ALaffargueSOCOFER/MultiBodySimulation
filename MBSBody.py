@@ -26,7 +26,7 @@ class MBSRigidBody3D:
 
 
 
-        self._position = np.zeros(3, dtype=float)
+        self._referencePosition = np.zeros(3, dtype=float)
         self._angles = np.zeros(3, dtype=float)
         self._initial_position = np.zeros(3, dtype=float)
         self._initial_angles = np.zeros(3, dtype=float)
@@ -48,13 +48,13 @@ class MBSRigidBody3D:
     def GetName(self):
         return self._name
 
-    def GetPos(self):
-        return self._position
+    def GetReferencePosition(self):
+        return self._referencePosition
 
-    def GetAngle(self):
+    def GetReferenceAngle(self):
         return self._angles
 
-    def SetPos(self, position : np.ndarray):
+    def SetReferencePosition(self, position : np.ndarray):
         """
         Défini la position du corps dans le repère global
         """
@@ -62,10 +62,10 @@ class MBSRigidBody3D:
         if position.shape != (3,):
             raise ValueError("Position vector must be shape (3,)")
 
-        self._position = position.copy()
+        self._referencePosition = position.copy()
         self._initial_position = position.copy()
 
-    def SetAngle(self, angle : np.ndarray):
+    def SetReferenceAngle(self, angle : np.ndarray):
         """
         Défini l'angle du corps dans le repère global
         """
@@ -108,7 +108,7 @@ class MBSRigidBody3D:
         if global_point.shape != (3,):
             raise ValueError("global_point must be a 3D vector of shape (3,)")
         R = RotationMatrix(*self._angles)
-        return np.linalg.solve(R, global_point - self._position)
+        return np.linalg.solve(R, global_point - self._referencePosition)
 
     def GetBodyGlobalCoords(self, local_point):
         """
@@ -121,7 +121,7 @@ class MBSRigidBody3D:
             raise ValueError("local_point must be a 3D vector of shape (3,)")
         R = RotationMatrix(*self._angles)
 
-        return self._position + R @ local_point
+        return self._referencePosition + R @ local_point
 
     def GetBodyGlobalVector(self, local_vector):
         """

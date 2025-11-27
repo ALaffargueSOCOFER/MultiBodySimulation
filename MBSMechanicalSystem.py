@@ -63,6 +63,23 @@ class MBSMechanicalSystem3D:
         for i, b in enumerate(self.__allbodies):
             self.body_index_map[b] = i
 
+
+        self.__x_indices = []
+        self.__theta_indices = []
+        for i in range(self.__nbodies):
+            s = 6*i
+            self.__x_indices += [s, s+1, s+2]
+            self.__theta_indices += [s+3, s+3 + 1, s+3 + 2]
+
+
+        self.__xref_indices = []
+        self.__thetaref_indices = []
+        for i in range(self.__nrefbodies):
+            s = 6*i
+            self.__xref_indices += [s, s+1, s+2]
+            self.__thetaref_indices += [s+3, s+3 + 1, s+3 + 2]
+
+
     def __vecProductMatrix(self,A,B):
         x = (B-A)
         xi,yi,zi = x
@@ -122,7 +139,7 @@ class MBSMechanicalSystem3D:
         y = []
         dydt = []
         for body in self.bodies :
-            y.append(body._initial_position - body._position)
+            y.append(body._initial_position - body._referencePosition)
             y.append(body._initial_angles - body._angles)
             dydt.append(body._velocity)
             dydt.append(body._omega)
@@ -131,14 +148,14 @@ class MBSMechanicalSystem3D:
     def _recompose_ref_body_position(self, Dy):
         y = Dy[:]
         for i, body in enumerate(self.ref_bodies):
-            y[6 * i:6 * i + 3] = body._position[:, None] + Dy[6 * i:6 * i + 3]
+            y[6 * i:6 * i + 3] = body._referencePosition[:, None] + Dy[6 * i:6 * i + 3]
             y[6 * i + 3:6 * i + 6] = body._angles[:, None] + Dy[6 * i + 3:6 * i + 6]
         return y
 
     def _recompose_body_position(self, Dy):
         y = Dy[:]
         for i, body in enumerate(self.bodies):
-            y[6 * i:6 * i + 3] = body._position[:, None] + Dy[6 * i:6 * i + 3]
+            y[6 * i:6 * i + 3] = body._referencePosition[:, None] + Dy[6 * i:6 * i + 3]
             y[6 * i + 3:6 * i + 6] = body._angles[:, None] + Dy[6 * i + 3:6 * i + 6]
         return y
 
@@ -207,8 +224,8 @@ class MBSMechanicalSystem3D:
             si = self._block_slice(i)
             sj = self._block_slice(j)
 
-            G1 = b1.GetPos()
-            G2 = b2.GetPos()
+            G1 = b1.GetReferencePosition()
+            G2 = b2.GetReferencePosition()
 
             O1 = link.GetGlobalPoint1
             O2 = link.GetGlobalPoint2
@@ -514,10 +531,14 @@ class MBSMechanicalSystem3D:
         else :
             jac = self._approxJacobian
 
+        # event = lambda t,y : self._check_largeAngles(t,y,angleTreshold= smallAnglesThreshold)
+        # event.terminal = True
 
-        for k, (start, end) in enumerate(zip(steps[:-1],steps[1:]),start=1) :
-            t_substep = t_eval[start:end:]
+
+        for k, (start_substep, end_substep) in enumerate(zip(steps[:-1],steps[1:]),start=1) :
+            t_substep = t_eval[start_substep:end_substep:]
             t_span = (t_substep[0], t_substep[-1])
+
 
 
             sol = solve_ivp(self.__IVP_derivativeFunc,
@@ -525,10 +546,11 @@ class MBSMechanicalSystem3D:
                             Dy0,
                             method=method,
                             t_eval=t_substep,
-                            jac=jac)
+                            jac=jac,
+                            )
 
-            Dyfixed[:,start:end-1:] = np.array([self._get_ref_state_vector(ti) for ti in t_substep[:-1]]).T
-            Dy[:, start:end-1:] = sol.y[:,:-1]
+            Dyfixed[:,start_substep:end_substep-1:] = np.array([self._get_ref_state_vector(ti) for ti in t_substep[:-1]]).T
+            Dy[:, start_substep:end_substep-1:] = sol.y[:,:-1]
 
             Dy0 = sol.y[:,-1]
             if k == substep :
@@ -672,3 +694,15 @@ class MBSMechanicalSystem3D:
         return Agap_penal + self.__Jac_linear
 
 
+    def _check_largeAngles(self, t, y, angleTreshold : float =None):
+        if angleTreshold is None : return 1.0
+        yfixed = self._get_ref_state_vector(t)
+        max_angle = max(
+            np.max( np.abs(y[self.__theta_indices]) ),
+            np.max( np.abs(yfixed[self.__thetaref_indices]) )
+        )
+        print(max_angle)
+        if t >25.0 : return 0.
+        # Si max_angle > angleTreshold return 0.
+        # Active l'event
+        return (max_angle < angleTreshold) * 1.0
