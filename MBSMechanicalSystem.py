@@ -833,15 +833,47 @@ class MBSLinearSystem(__MBSBase):
         return True
 
 
-    def __checkEigVals(self, lambda_):
-        if np.any(lambda_ < -1e-10):  # Tolérance pour erreurs numériques
-            n_negative = np.sum(lambda_ < -1e-10)
-            warnings.warn(f"Attention : {n_negative} valeurs propres négatives détectées. "
+    def __checkEigVals(self, lambda_, dll_vec = None):
+        is_negative = (lambda_ < -1e-7)
+        if np.any(is_negative):  # Tolérance pour erreurs numériques
+            n_negative = [f"{x:.3e}" for x in lambda_[is_negative] ]
+            if dll_vec is not None :
+                axe = dll_vec[is_negative]
+                n_negative = [f"{(a,n)}" for a,n in zip(axe, n_negative)]
+
+            warnings.warn(f"Attention : \n{'\n'.join(n_negative)}\n"
+                          "valeurs propres négatives détectées. "
                           f"Le système pourrait être instable ou mal conditionné.")
 
         # Clip les petites valeurs négatives dues aux erreurs numériques
         lambda_ = np.maximum(lambda_, 0.0)
         return lambda_
+
+
+    def CheckUnconstrainedDegreeOfFreedom(self):
+        if not self._assembled :
+            self.AssemblyMatrixSystem()
+
+        if not self._check_linearity() :
+            raise ValueError("Le système n'est pas totalement linéaire. "
+                             "Le système comporte des liaisons non linéaires ou "
+                             "des liaisons de contact avec jeu. "
+                             "L'analyse des degrés de liberté non contraints risque d'être faussé")
+
+        filtered_rows = np.all(self._Kff == 0, axis=0)
+
+        dll_body = ["X", "Y", "Z", "rX", "rY", "rZ"]
+        system_dll = []
+        for body in self.bodies :
+            system_dll += [ body.GetName + " >>> " + dll for dll  in dll_body ]
+        unconstrained_dll = np.array(system_dll)[filtered_rows]
+
+        print("="*40)
+        print("Dégrés de liberté libres et non-conditionnés : ")
+        for s in unconstrained_dll :
+            print(s)
+        print("=" * 40)
+
 
 
     def ComputeModalAnalysis(self, sort_values = False,
@@ -863,17 +895,19 @@ class MBSLinearSystem(__MBSBase):
                              "des liaisons de contact avec jeu. "
                              "L'analyse modale n'est pas possible.")
 
+        dll_vec = np.array([f"{body.GetName} - {d}" for d in ["x", "y", "z", "rx", "ry", "rz"] for body in self.bodies])
         if drop_zeros :
             filtered_rows = ~ np.all( self._Kff == 0, axis=0)
             K = self._Kff[filtered_rows][:,filtered_rows]
             M = self._Mff[filtered_rows][:,filtered_rows]
+            dll_vec = dll_vec[filtered_rows]
         else :
             filtered_rows = np.full(self._nbodies*6,True, dtype=bool)
             K = self._Kff
             M = self._Mff
 
         lambda_, phi_ = eigh(K, M)
-        lambda_ = self.__checkEigVals(lambda_)
+        lambda_ = self.__checkEigVals(lambda_, dll_vec)
 
         n_mode = len(lambda_)
 
@@ -902,12 +936,13 @@ class MBSLinearSystem(__MBSBase):
         return modal_results
 
 
-    def ComputeNaturalPulsations(self,sort_values=False, drop_zeros=False):
+    def ComputeNaturalPulsations(self,sort_values=False, drop_zeros=False, associated_dll=False):
         """
         Calcul des pulsations de propres du système.
 
         :param sort_values: (bool) active le tri croissant ou non des valeurs.
         :param drop_zeros: (bool) retire les colonnes et lignes totalement vides de l'analyse
+        :param associated_dll: (bool) retourne les dll associés aux fréquences propres
 
         :return: numpy array des pulsations propres.
 
@@ -925,28 +960,36 @@ class MBSLinearSystem(__MBSBase):
                              "des liaisons de contact avec jeu. "
                              "L'analyse modale n'est pas possible.")
 
+        dll_vec = np.array([f"{body.GetName} - {d}" for d in ["x","y","z","rx","ry","rz"] for body in self.bodies])
         if drop_zeros :
             filtered_rows = ~ np.all( self._Kff == 0, axis=0)
             K = self._Kff[filtered_rows][:,filtered_rows]
             M = self._Mff[filtered_rows][:,filtered_rows]
+            dll_vec = dll_vec[filtered_rows]
         else :
             K = self._Kff
             M = self._Mff
 
         lambda_ = eigvalsh(K,M)
-        lambda_ = self.__checkEigVals(lambda_)
+        lambda_ = self.__checkEigVals(lambda_, dll_vec)
         omega = np.sqrt(lambda_)
 
         if sort_values :
-            return np.sort(omega)
+            args_sort = np.argsort(omega)
+            omega = omega[args_sort]
+            dll_vec = dll_vec[args_sort]
+
+        if associated_dll :
+            return omega, dll_vec
         return omega
 
-    def ComputeNaturalFrequencies(self,sort_values=False, drop_zeros=False):
+    def ComputeNaturalFrequencies(self,sort_values=False, drop_zeros=False, associated_dll = False):
         """
         Calcul des fréquences de propres du système.
 
         :param sort_values: (bool) active le tri croissant ou non des valeurs.
         :param drop_zeros: (bool) retire les colonnes et lignes totalement vides de l'analyse
+        :param associated_dll: (bool) retourne les dll associés aux fréquences propres
 
         :return: numpy array des fréquences propres.
 
@@ -955,14 +998,17 @@ class MBSLinearSystem(__MBSBase):
         MBSLinearSystem.ComputeNaturalPulsations
 
         """
-        return self.ComputeNaturalPulsations(sort_values, drop_zeros)/(2*np.pi)
-
-
+        r = self.ComputeNaturalPulsations(sort_values, drop_zeros, associated_dll)
+        if associated_dll :
+            return r[0] / (2 * np.pi), r[1]
+        else :
+            return r / (np.pi *2)
 
     def ComputeFrequencyDomainResponse(self,input_output : List,
                                             frequency_array : np.array = None,
                                             fstart = None , fend = None,
                                             print_damping = True,
+                                            print_progress_step : int = None,
                                             nbase=20):
         """
         Calcule la réponse fréquentielle du système par projection modale.
@@ -999,6 +1045,10 @@ class MBSLinearSystem(__MBSBase):
         print_damping : bool, optional (default=True)
             Affiche les taux d'amortissement modaux si la matrice d'amortissement
             est diagonale dans la base modale.
+
+        print_progress_step : int, optional (default=None)
+            Print une progression des calculs. Utiles si lourds et non diagonale.
+            Le step est un entier représentant un pourcentage.
 
         nbase : int, optional (default=20)
             Nombre de points par décade pour l'échantillonnage logarithmique
@@ -1056,11 +1106,12 @@ class MBSLinearSystem(__MBSBase):
                              "des liaisons de contact avec jeu. "
                              "L'analyse modale n'est pas possible.")
 
-
+        dll_vec = np.array([f"{body.GetName} - {d}" for d in ["x", "y", "z", "rx", "ry", "rz"] for body in self.bodies])
         filtered_rows = ~ np.all((self._Kff == 0) & (self._Cff == 0), axis=0)
         K = self._Kff[filtered_rows][:, filtered_rows]
         C = self._Cff[filtered_rows][:, filtered_rows]
         M = self._Mff[filtered_rows][:, filtered_rows]
+        dll_vec = dll_vec[filtered_rows]
 
 
         all_indexes = np.array(list(range(self._nbodies * 6)), dtype=int)
@@ -1077,7 +1128,7 @@ class MBSLinearSystem(__MBSBase):
 
 
         lambda_, phi = eigh(K, M)
-        lambda_ = self.__checkEigVals(lambda_)
+        lambda_ = self.__checkEigVals(lambda_, dll_vec)
 
         # Normalisation  de phi_ pour obtenir
         # phi_.T @ Mf @ phi_ = Identité
@@ -1093,7 +1144,9 @@ class MBSLinearSystem(__MBSBase):
         Kb_phi = phi.T @ Kb
         Cphi = phi.T @ C @ phi
 
-        diag_damping = np.isclose(Cphi, np.diag(np.diag(Cphi))).all()
+        non_diag_terms_norm = np.abs( Cphi - np.diag( np.diag(Cphi) ) )
+        diag_terms_booleen = np.isclose(non_diag_terms_norm, 0.0, atol=0., rtol=1e-3)
+        diag_damping = diag_terms_booleen.all()
 
         xi = None
         if diag_damping :
@@ -1105,6 +1158,13 @@ class MBSLinearSystem(__MBSBase):
                 print("Damping factors")
                 for wi, ci in zip(omega_0, xi) :
                     print(f"ω0 = {wi:.4e} rad/s | ξ = {ci:.4e}")
+        elif print_damping :
+            non_zero_nondiag = non_diag_terms_norm[~diag_terms_booleen]
+            print("=" * 40)
+            print("Non diagonal damping coefficients : ")
+            print(f"Average : {non_zero_nondiag.mean():.2e}")
+            print(f"Median : {np.median(non_zero_nondiag):.2e}")
+            print(f"Max : {np.max(non_zero_nondiag):.2e}")
 
         # Validation de la structure input_output
         if not isinstance(input_output, list) or len(input_output) == 0:
@@ -1184,20 +1244,28 @@ class MBSLinearSystem(__MBSBase):
         if frequency_array is not None :
             if not np.all( frequency_array > 0 ) :
                 raise ValueError("'frequency_array' must be positive")
+            npoints = len(frequency_array)
         elif (fstart is not None and fend is not None) :
             if not fstart >0 : raise ValueError("'fstart' must be positive")
             if not fend > fstart : raise ValueError("'fend' must be greater than 'fstart'")
             npoints = int(nbase * fend / fstart)
             frequency_array = np.logspace(np.log10(fstart), np.log10(fend), npoints)
         else :
-            fstart = 0.5 * omega_0.min() / (2 * np.pi)
-            fend = 2.0 * omega_0.max() / (2 * np.pi)
+            fstart = 0.5 * omega_0[omega_0>0].min() / (2 * np.pi)
+            fend = 2.0 * omega_0[omega_0>0].max() / (2 * np.pi)
             npoints = int(nbase * fend / fstart)
             frequency_array = np.logspace(np.log10(fstart), np.log10(fend), npoints)
 
 
         Gi_array = []
+        print_progress_step = int(print_progress_step) if print_progress_step is not None else 0
+        print_progress = print_progress_step > 0
+        progress_step = [npoints * r/100 for r in range(0,100,print_progress_step)] if print_progress else []
         for i, wi in enumerate(frequency_array * 2 * np.pi) :
+            if len(progress_step)>0 and i>progress_step[0] :
+                print(f"     Progression >> {int(100 * i/npoints)} %")
+                progress_step.pop(0)
+
             if diag_damping :
                 Hinv = np.diag(1/(omega_0**2 + 1j*wi*2*xi*omega_0 - wi**2))
             else :
