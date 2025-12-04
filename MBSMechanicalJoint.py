@@ -5,7 +5,55 @@ import numpy as np
 
 from MultiBodySimulation.MBSBody import MBSRigidBody3D
 
+"""
+MBSMechanicalJoint
+------------------
+
+Contient les classes représentant différents types de liaisons mécaniques
+entre corps rigides 3D utilisés par la simulation multi-corps.
+
+Principales classes:
+- :class:`_MBSLink3D` : classe de base (privée) pour les liaisons 3D.
+- :class:`MBSLinkLinearSpringDamper` : liaison ressort-amortisseur linéaire.
+- :class:`MBSLinkKinematic` : liaison kinematique (contraintes fortement pénalisées).
+- :class:`MBSLinkHardStop` : butée dure (hard stop) avec gap.
+- :class:`MBSLinkSmoothLinearStop` : butée lisse avec pénalisation progressive.
+
+"""
+
 class _MBSLink3D:
+    """Classe de base pour une liaison 3D entre deux corps rigides.
+
+    Cette classe encapsule les points d'attache en coordonnées locales,
+    les matrices de raideur et d'amortissement (linéaires et angulaires),
+    et fournit des méthodes pour calculer les efforts locaux de la liaison.
+
+    :param body1: Premier corps rigide (corps 1).
+    :type body1: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point1: Point d'attache sur le corps 1 (coordonnées globales, vecteur 3D).
+    :type global_point1: numpy.ndarray
+    :param body2: Second corps rigide (corps 2).
+    :type body2: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point2: Point d'attache sur le corps 2 (coordonnées globales, vecteur 3D).
+    :type global_point2: numpy.ndarray
+    :param stiffness: Raideur linéaire (scalaire, vecteur 3 ou matrice 3x3).
+    :type stiffness: float | list | numpy.ndarray
+    :param damping: Amortissement linéaire (scalaire, vecteur 3 ou matrice 3x3).
+    :type damping: float | list | numpy.ndarray
+    :param angular_stiffness: Raideur angulaire (scalaire, vecteur 3 ou matrice 3x3).
+    :type angular_stiffness: float | list | numpy.ndarray
+    :param angular_damping: Amortissement angulaire (scalaire, vecteur 3 ou matrice 3x3).
+    :type angular_damping: float | list | numpy.ndarray
+
+    Paramètre privés
+
+    :param linear_reaction: Si True, la réaction est traitée linéairement.
+    :type linear_reaction: bool
+    :param has_freegap: Indique la présence d'un jeu (gap) dans la liaison.
+    :type has_freegap: bool
+    :param kinematic_link: Si True, la liaison est une contrainte kinematique pénalisée.
+    :type kinematic_link: bool
+    """
     def __init__(self,
                     body1  : MBSRigidBody3D,
                     global_point1 : np.ndarray,
@@ -94,6 +142,22 @@ class _MBSLink3D:
         return self._K, self._C, self._K_theta, self._C_theta
 
     def _init_structural_stiffness(self, stiffness, damping, angular_stiffness, angular_damping):
+        """Initialise les matrices de raideur et d'amortissement.
+
+        Accepte des scalaires, des vecteurs 3-éléments ou des matrices 3x3
+        et normalise ces entrées en matrices 3x3 stockées dans
+        ``self._K``, ``self._C``, ``self._K_theta`` et ``self._C_theta``.
+
+        :param stiffness: raideur translationnelle (scalaire, vecteur ou matrice)
+        :type stiffness: float | list | numpy.ndarray
+        :param damping: amortissement translationnel (scalaire, vecteur ou matrice)
+        :type damping: float | list | numpy.ndarray
+        :param angular_stiffness: raideur rotationnelle (scalaire, vecteur ou matrice)
+        :type angular_stiffness: float | list | numpy.ndarray
+        :param angular_damping: amortissement rotationnel (scalaire, vecteur ou matrice)
+        :type angular_damping: float | list | numpy.ndarray
+        :return: None
+        """
 
         if stiffness is None:
             stiffness = 0.0
@@ -145,6 +209,22 @@ class _MBSLink3D:
 
 
     def _check_gap_values(self, Tx, name=""):
+        """Vérifie et normalise les valeurs de gap (butée).
+
+        Accepte ``None``, un scalaire (symétrique) ou un tuple/list de deux valeurs
+        (borne inférieure, borne supérieure). Renvoie un indicateur (0/1)
+        indiquant si la direction est active et la paire (min, max) des limites.
+
+        :param Tx: valeur de gap (None, float/int ou tuple/list de 2 valeurs)
+        :type Tx: None | float | int | tuple | list
+        :param name: nom de la direction (pour message d'erreur)
+        :type name: str
+        :return: tuple (active_flag, (min, max))
+        :rtype: (float, tuple)
+
+        :raises ValueError: si le format de ``Tx`` n'est pas valide
+        """
+
         error_mess = f"Incorrect hard stop value in direction ({name}) : needs float/int or 2-values tuple of float / int"
         if Tx is None :
             return 0.0, (-np.inf, np.inf)
@@ -159,6 +239,19 @@ class _MBSLink3D:
             raise ValueError(error_mess)
 
     def GetLinearLocalReactions(self, U1, V1, U2, V2):
+        """Calcule les efforts locaux linéaires (force et couple) de la liaison.
+
+        Les vecteurs d'état suivent la convention : les trois premières composantes
+        sont la translation, les trois suivantes la rotation (angle/axe) ou vitesse.
+
+        :param U1: vecteur d'état (pos/angle) du corps 1 au point local
+        :param V1: vecteur de vitesse du corps 1 au point local
+        :param U2: vecteur d'état (pos/angle) du corps 2 au point local
+        :param V2: vecteur de vitesse du corps 2 au point local
+        :return: tuple (force, torque) exprimés dans le repère local de la liaison
+        :rtype: (numpy.ndarray, numpy.ndarray)
+        """
+
         dp = U2[:3] - U1[:3]
         dv = V2[:3] - V1[:3]
         angle_axis = U2[3:] - U1[3:]
@@ -181,10 +274,46 @@ class _MBSLink3D:
 
     def GetNonLinearLocalReactions(self, U1=None, V1=None, U2=None, V2=None,
                                         dUlocal=None, dVlocal=None):
+        """Point d'extension pour les réactions non-linéaires.
+
+        Par défaut la liaison de base ne fournit pas de réaction non-linéaire
+        et renvoie des vecteurs nuls. Les classes dérivées peuvent surcharger
+        cette méthode pour implémenter des lois non-linéaires (frottement, butées, ...).
+
+        :return: (force_nonlin, torque_nonlin)
+        :rtype: (numpy.ndarray, numpy.ndarray)
+        """
+
         return np.zeros(3), np.zeros(3)
 
 
 class MBSLinkLinearSpringDamper(_MBSLink3D) :
+    """Liaison ressort-amortisseur linéaire entre deux corps.
+
+    Utilise la logique de :class:`_MBSLink3D` pour initialiser les matrices
+    de raideur et d'amortissement fournies en paramètres.
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param body1: premier corps rigide attaché à la liaison
+    :type body1: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point1: point d'attache sur le corps 1 (coordonnées globales, vecteur 3D)
+    :type global_point1: numpy.ndarray
+    :param body2: second corps rigide attaché à la liaison
+    :type body2: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point2: point d'attache sur le corps 2 (coordonnées globales, vecteur 3D)
+    :type global_point2: numpy.ndarray
+    :param stiffness: raideur translationnelle (scalaire, vecteur 3 ou matrice 3x3)
+    :type stiffness: float | list | numpy.ndarray | None
+    :param damping: amortissement translationnel (scalaire, vecteur 3 ou matrice 3x3)
+    :type damping: float | list | numpy.ndarray | None
+    :param angular_stiffness: raideur rotationnelle (scalaire, vecteur 3 ou matrice 3x3)
+    :type angular_stiffness: float | list | numpy.ndarray | None
+    :param angular_damping: amortissement rotationnel (scalaire, vecteur 3 ou matrice 3x3)
+    :type angular_damping: float | list | numpy.ndarray | None
+
+    :return: instance de :class:`MBSLinkLinearSpringDamper`
+    """
 
     def __init__(self,
         body1: MBSRigidBody3D,
@@ -211,6 +340,47 @@ class MBSLinkLinearSpringDamper(_MBSLink3D) :
                        )
 
 class MBSLinkKinematic(_MBSLink3D):
+    """Liaison cinématique fortement pénalisée.
+
+    Cette liaison modélise des contraintes rigides sur les six degrés
+    de liberté (Tx, Ty, Tz pour les translations et Rx, Ry, Rz pour les
+    rotations) en utilisant une approche par pénalisation. Les raideurs
+    et amortissements sont calculés automatiquement à partir des masses
+    et inerties des corps et d'une tolérance de contrainte.
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param body1: premier corps rigide
+    :type body1: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point1: point d'attache sur le corps 1 (coordonnées globales)
+    :type global_point1: numpy.ndarray
+    :param body2: second corps rigide
+    :type body2: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point2: point d'attache sur le corps 2 (coordonnées globales)
+    :type global_point2: numpy.ndarray
+    :param Tx: activation contrainte translation X (0 ou 1)
+    :type Tx: int | float
+    :param Ty: activation contrainte translation Y (0 ou 1)
+    :type Ty: int | float
+    :param Tz: activation contrainte translation Z (0 ou 1)
+    :type Tz: int | float
+    :param Rx: activation contrainte rotation X (0 ou 1)
+    :type Rx: int | float
+    :param Ry: activation contrainte rotation Y (0 ou 1)
+    :type Ry: int | float
+    :param Rz: activation contrainte rotation Z (0 ou 1)
+    :type Rz: int | float
+    :param kinematic_tolerance: tolérance utilisée pour calculer les pénalités
+    :type kinematic_tolerance: float
+
+    :return: instance de :class:`MBSLinkKinematic`
+
+    Méthodes importantes:
+    - :meth:`SetTransFriction` pour ajouter un modèle de frottement
+        translationnel.
+    - :meth:`SetRotationalFriction` pour ajouter un modèle de frottement
+        rotationnel.
+    """
 
     def __init__(self,
                         body1: MBSRigidBody3D, global_point1: np.ndarray,
@@ -268,38 +438,41 @@ class MBSLinkKinematic(_MBSLink3D):
                          frictionCoefficient: float = 0.2,
                          relativeSpeedRegulationScale: float = 1e-3,
                          normalProjectionMatrix : np.ndarray = None):
-        """
-        Ajoute un frottement aux translations
+        """Active un modèle de frottement translationnel pénalisé.
 
-        :param:
+        Le modèle est une loi de Coulomb régularisée (tanh) avec projection
+        normale `P` et tangente `Q = I - P`. Les efforts sont définis pour
+        "corps 2 >>> corps 1".
 
-        - normalInitialContactForces : force normale initiale (corps 2 >>> corps 1) noté Fn_init;
-        - frictionCoefficient : coefficient de frottement noté µ;
-        - relativeSpeedRegulationScale : vitesse pour lissage de la loi de Coulomb noté vs;
-        - normalProjectionMatrix : matrice de projection pour les efforts normaux notés P >> Fn = P @ F;
+        :param normalInitialContactForces: Force normale initiale (corps 2 >>> corps 1) noté Fn_init.
+        :type normalInitialContactForces: float
+        :param frictionCoefficient: Coefficient de frottement noté µ.
+        :type frictionCoefficient: float
+        :param relativeSpeedRegulationScale: Vitesse pour lissage de la loi de Coulomb noté vs.
+        :type relativeSpeedRegulationScale: float
+        :param normalProjectionMatrix: 
+            Matrice de projection pour les efforts normaux notés P >> Fn = P @ F.
+            Pour un frottement sur une direction normale n, utilisez P = n . n^T.
+            Si P la matrice P est None, alors P = diag(Tx,Ty,Tz) ==> translations bloquées.
+            :type normalProjectionMatrix: np.ndarray | None
 
-        Pour un frottement sur une direction normale n, utilisez P = n . n^T
-        Si P la matrice P est None :
-         - P = diag(Tx,Ty,Tz) ==> translations bloquées
+        Définition de la loi :
+        Les efforts sont définis pour corps 2 >>> corps 1.
 
-        Définition de la loi  :
-        Les efforts sont définis pour corps 2 >>> corps 1
+        La matrice de projection tangentielle Q = I - P.
+        Efforts de réactions locales de contact normaux:
+        Fn_reac = || P @ ( K dX + C dV ) ||
 
-        La matrice de projection tangentielle Q = id - P
-        Efforts de réactions locales de contact normaux
-        Fn_reac = norm( P @ ( K dX + X dV ) )
-
-        Efforts normaux
+        Efforts normaux:
         Fn = Fn_reac + Fn_init
 
-        vitesse tangentielle
+        Vitesse tangentielle:
         v = Q @ dv
 
-        Efforts locaux de frottement tangents
-        Ft = µ * Fn * tanh(norm(v) / vs) * direction
+        Efforts locaux de frottement tangents:
+        Ft = µ * Fn * tanh(||v|| / vs) * direction
 
         avec ct un damping pour hautes fréquences.
-
         """
         if normalProjectionMatrix is None :
             normalProjectionMatrix = np.diag(self.__kinematicConstraints[:3])
@@ -318,40 +491,37 @@ class MBSLinkKinematic(_MBSLink3D):
                               frictionCoefficient: float = 0.2,
                               relativeOmegaRegulationScale: float = 1e-3,
                               normalProjectionMatrix: np.ndarray = None):
-        """
-        Ajoute un frottement aux translations
+        r"""Active un modèle de frottement rotationnel pénalisé.
 
-        :param:
+        La loi est analogue à la version translationnelle mais applique
+        un couple proportionnel à :math:`\mu * r * F_n` régularisé par \tanh.
 
-        - rotationRadius : rayon interne de la liaison
-        - normalInitialContactForces : force normale initiale (corps 2 >>> corps 1) noté Fn_init;
-        - frictionCoefficient : coefficient de frottement noté µ;
-        - relativeOmegaRegulationScale : vitesse angulaire pour lissage de la loi de Coulomb noté ws;
-        - normalProjectionMatrix : matrice de projection pour des efforts notés P;
+        **Paramètres :**
+        - **rotationRadius** (float) : rayon interne de la liaison.
+        - **normalInitialContactForces** (float) : force normale initiale (corps 2 >>> corps 1) noté Fn_init.
+        - **frictionCoefficient** (float) : coefficient de frottement noté µ.
+        - **relativeOmegaRegulationScale** (float) : vitesse angulaire pour lissage de la loi de Coulomb noté ws.
+        - **normalProjectionMatrix** (np.ndarray | None) : matrice de projection pour des efforts notés P.
+            Pour un frottement sur une direction normale n, utilisez P = n . n^T.
+            Si la matrice de projection est None, alors P = diag(Tx,Ty,Tz) ==> translations bloquées.
+            La matrice de projection tangentielle est Q = Qrot = Ptrans = P.
 
-        Pour un frottement sur une direction normale n, utilisez P = n . n^T
-        Si la matrice de projection est None :
-            - P = diag(Tx,Ty,Tz) ==> translations bloquées
-        La matrice de projection tangentielle est Q = Qrot = Ptrans = P
+        **Définition de la loi :**
+        Les efforts sont définis pour corps 2 >>> corps 1.
+        
+        Efforts de réactions locales de contact normaux :
+        Fn_reac = || P @ ( K dX + C dV ) ||
 
-        Définition de la loi  :
-        Les efforts sont définis pour corps 2 >>> corps 1
-        Efforts de réactions locales de contact normaux
-        Fn_reac = norm( P @ ( K dX + C dV ) )
-
-        Efforts normaux
+        Efforts normaux :
         Fn = Fn_reac + Fn_init
 
-        Vitesse tangentielle
+        Vitesse tangentielle :
         w = P @ omega = Q @ omega
 
+        **Couple de frottement :**
+        Tf = µ * r * Fn * tanh(||w|| / ws) * direction(w)
 
-        Couple de frottement
-        Tf = µ * r * Fn * tanh(norm(w) / ws) * direction(w)
-
-        avec ct un damping pour hautes fréquences.
-
-        """
+        avec ct un damping pour hautes fréquences."""
 
         if normalProjectionMatrix is None :
             normalProjectionMatrix = np.diag(self.__kinematicConstraints[:3])
@@ -366,6 +536,16 @@ class MBSLinkKinematic(_MBSLink3D):
 
     def GetNonLinearLocalReactions(self, U1=None, V1=None, U2=None, V2=None,
                                         dUlocal=None, dVlocal=None):
+        """Calcule les réactions non-linéaires (frottement) si définies.
+
+        Accepte soit les déplacements/vitesses locaux ``U1,V1,U2,V2`` soit
+        les déformations locales ``dUlocal,dVlocal`` (mais pas les deux).
+
+        :return: (force_tangente, torque_tangente)
+        :rtype: (numpy.ndarray, numpy.ndarray)
+        :raises ValueError: si les paramètres fournis sont ambigus ou manquants
+        """
+
         local_disp = True
         if U1 is None or U2 is None or V1 is None or V1 is None :
             local_disp = False
@@ -451,6 +631,41 @@ class MBSLinkKinematic(_MBSLink3D):
 
 
 class MBSLinkHardStop(_MBSLink3D) :
+    """Butée dure (hard stop) avec jeu (gap) en translation et rotation.
+
+    Cette classe applique des butées unilatérales définies par des intervalles
+    pour chaque direction (translation et rotation). Lorsque la déformation
+    dépasse les bornes du jeu, des efforts de contact sont calculés à partir
+    de pénalités (raideur/amortissement) dépendant des masses/inerties et de
+    la tolérance fournie.
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param body1: premier corps rigide
+    :type body1: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point1: point d'attache sur le corps 1 (coordonnées globales)
+    :type global_point1: numpy.ndarray
+    :param body2: second corps rigide
+    :type body2: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point2: point d'attache sur le corps 2 (coordonnées globales)
+    :type global_point2: numpy.ndarray
+    :param Tx_gap: gap en X (None, scalaire ou tuple(min,max))
+    :type Tx_gap: None | float | tuple
+    :param Ty_gap: gap en Y (None, scalaire ou tuple(min,max))
+    :type Ty_gap: None | float | tuple
+    :param Tz_gap: gap en Z (None, scalaire ou tuple(min,max))
+    :type Tz_gap: None | float | tuple
+    :param Rx_gap: gap rotationnel autour X (None, scalaire ou tuple(min,max))
+    :type Rx_gap: None | float | tuple
+    :param Ry_gap: gap rotationnel autour Y (None, scalaire ou tuple(min,max))
+    :type Ry_gap: None | float | tuple
+    :param Rz_gap: gap rotationnel autour Z (None, scalaire ou tuple(min,max))
+    :type Rz_gap: None | float | tuple
+    :param penetration_tolerance: tolérance de pénétration utilisée pour calculer les pénalités
+    :type penetration_tolerance: float
+
+    :return: instance de :class:`MBSLinkHardStop`
+    """
     def __init__(self, body1: MBSRigidBody3D, global_point1: np.ndarray,
                  body2: MBSRigidBody3D, global_point2: np.ndarray,
                  Tx_gap=None,
@@ -505,6 +720,20 @@ class MBSLinkHardStop(_MBSLink3D) :
         self._RotGap_vector = np.array([Rx_gap, Ry_gap, Rz_gap])
 
     def GetLinearLocalReactions(self, U1, V1, U2, V2):
+        """Calcule la force et le couple de contact pour la butée dure.
+
+        Ne génère des efforts que lorsque la déformation dépasse les limites
+        de jeu stockées dans ``self._TransGap_vector`` et
+        ``self._RotGap_vector``.
+
+        :param U1: vecteur état (corps 1)
+        :param V1: vecteur vitesse (corps 1)
+        :param U2: vecteur état (corps 2)
+        :param V2: vecteur vitesse (corps 2)
+        :return: (force, torque)
+        :rtype: (numpy.ndarray, numpy.ndarray)
+        """
+
         dp = U2[:3] - U1[:3]
         dv = V2[:3] - V1[:3]
         angle_axis = U2[3:] - U1[3:]
@@ -538,6 +767,44 @@ class MBSLinkHardStop(_MBSLink3D) :
 
 
 class MBSLinkSmoothLinearStop(_MBSLink3D) :
+    """Butée lisse avec jeu (gap).
+
+    Implémente une liaison visco-élastique incluant un jeu de mise en contact. 
+    Exemple : butée élastique ou à ressort.
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param body1: premier corps rigide
+    :type body1: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point1: point d'attache sur le corps 1 (coordonnées globales)
+    :type global_point1: numpy.ndarray
+    :param body2: second corps rigide
+    :type body2: :class:`MultiBodySimulation.MBSBody.MBSRigidBody3D`
+    :param global_point2: point d'attache sur le corps 2 (coordonnées globales)
+    :type global_point2: numpy.ndarray
+    :param stiffness: raideur translationnelle (scalaire, vecteur 3 ou matrice 3x3)
+    :type stiffness: float | list | numpy.ndarray
+    :param damping: amortissement translationnel (scalaire, vecteur 3 ou matrice 3x3)
+    :type damping: float | list | numpy.ndarray
+    :param angular_stiffness: raideur rotationnelle (scalaire, vecteur 3 ou matrice 3x3)
+    :type angular_stiffness: float | list | numpy.ndarray
+    :param angular_damping: amortissement rotationnel (scalaire, vecteur 3 ou matrice 3x3)
+    :type angular_damping: float | list | numpy.ndarray
+    :param Tx_gap: gap en X (None, scalaire ou tuple(min,max))
+    :type Tx_gap: None | float | tuple
+    :param Ty_gap: gap en Y (None, scalaire ou tuple(min,max))
+    :type Ty_gap: None | float | tuple
+    :param Tz_gap: gap en Z (None, scalaire ou tuple(min,max))
+    :type Tz_gap: None | float | tuple
+    :param Rx_gap: gap rotationnel autour X (None, scalaire ou tuple(min,max))
+    :type Rx_gap: None | float | tuple
+    :param Ry_gap: gap rotationnel autour Y (None, scalaire ou tuple(min,max))
+    :type Ry_gap: None | float | tuple
+    :param Rz_gap: gap rotationnel autour Z (None, scalaire ou tuple(min,max))
+    :type Rz_gap: None | float | tuple
+
+    :return: instance de :class:`MBSLinkSmoothLinearStop`
+    """
     def __init__(self, body1: MBSRigidBody3D, global_point1: np.ndarray,
                  body2: MBSRigidBody3D, global_point2: np.ndarray,
                  stiffness,
@@ -585,6 +852,20 @@ class MBSLinkSmoothLinearStop(_MBSLink3D) :
         self._C_theta = np.diag([Rx, Ry, Rz]) * self._C_theta
 
     def GetLinearLocalReactions(self, U1, V1, U2, V2):
+        """Calcule les réactions (force, couple) pour la butée lisse.
+
+        Les calculs sont analogues à ceux de :class:`MBSLinkHardStop` mais
+        utilisent des matrices de raideur/amortissement modifiées pour une
+        réponse plus progressive.
+
+        :param U1: vecteur état (corps 1)
+        :param V1: vecteur vitesse (corps 1)
+        :param U2: vecteur état (corps 2)
+        :param V2: vecteur vitesse (corps 2)
+        :return: (force, torque)
+        :rtype: (numpy.ndarray, numpy.ndarray)
+        """
+
         dp = U2[:3] - U1[:3]
         dv = V2[:3] - V1[:3]
         angle_axis = U2[3:] - U1[3:]

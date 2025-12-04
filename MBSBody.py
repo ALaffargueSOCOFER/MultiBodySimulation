@@ -1,7 +1,50 @@
+"""MBSBody
+--------
+
+Module contenant les classes représentant des corps rigides 3D utilisés dans
+la simulation multi-corps.
+
+Classes principales:
+- :class:`MBSRigidBody3D` : corps rigide 3D avec masse et inertie.
+- :class:`MBSReferenceBody3D` : corps de référence fixe avec cinématique imposée.
+
+"""
+
 import numpy as np
 from MultiBodySimulation.MBS_numerics import RotationMatrix
 
 class MBSRigidBody3D:
+    """Corps rigide 3D avec masse et inertie pour simulation multi-corps.
+
+    Cette classe représente un corps rigide 3D caractérisé par sa masse,
+    son tenseur d'inertie, sa position de référence, ses angles de rotation,
+    et ses vitesses associées. Elle fournit des méthodes pour convertir entre
+    coordonnées globales et coordonnées locales du corps.
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param name: nom identifiant le corps
+    :type name: str
+    :param mass: masse du corps (kg)
+    :type mass: float
+    :param inertia_tensor: tenseur d'inertie (scalaire, vecteur 3 ou matrice 3x3)
+    :type inertia_tensor: float | numpy.ndarray
+
+    Attributs principaux:
+
+    :var _mass: masse du corps
+    :var _inv_mass: inverse de la masse (0 si masse nulle)
+    :var _inertia: tenseur d'inertie (matrice 3x3)
+    :var _inv_inertia: inverse du tenseur d'inertie
+    :var _referencePosition: position du centre de masse en coordonnées globales
+    :var _refAngles: angles de rotation (Euler XYZ) en coordonnées globales
+    :var _initial_position: position initiale du corps
+    :var _initial_angles: angles initiaux du corps
+    :var _velocity: vitesse du centre de masse
+    :var _omega: vitesse angulaire
+    :var _is_fixed: indique si le corps est fixe (immobile)
+    """
+    
     def __init__(self, name : str, mass : float, inertia_tensor : float | np.ndarray):
         self._name = name
         self._mass = mass
@@ -42,21 +85,49 @@ class MBSRigidBody3D:
 
     @property
     def IsFixed(self):
+        """Indique si le corps est fixe (immobile).
+
+        :return: True si le corps est fixe, False sinon
+        :rtype: bool
+        """
         return self._is_fixed
 
     @property
     def GetName(self):
+        """Retourne le nom du corps.
+
+        :return: nom du corps
+        :rtype: str
+        """
         return self._name
 
     def GetReferencePosition(self):
+        """Retourne la position de référence du centre de masse du corps.
+
+        :return: vecteur position (x, y, z) en coordonnées globales
+        :rtype: numpy.ndarray
+        """
         return self._referencePosition
 
     def GetReferenceAngle(self):
+        """Retourne les angles de rotation du corps.
+
+        :return: angles (Euler XYZ) en radians
+        :rtype: numpy.ndarray
+        """
         return self._refAngles
 
     def SetReferencePosition(self, position : np.ndarray):
-        """
-        Défini la position du corps dans le repère global
+        """Défini la position du centre de masse du corps dans le repère global.
+
+        Met à jour à la fois la position de référence et la position initiale
+        du corps.
+
+        :param position: vecteur position (x, y, z) en coordonnées globales
+        :type position: numpy.ndarray
+        :return: None
+
+        :raises ValueError: si le vecteur position n'est pas de forme (3,)
         """
         position = np.asarray(position)
         if position.shape != (3,):
@@ -66,8 +137,16 @@ class MBSRigidBody3D:
         self._initial_position = position.copy()
 
     def SetReferenceAngle(self, angle : np.ndarray):
-        """
-        Défini l'angle du corps dans le repère global
+        """Défini les angles de rotation du corps dans le repère global.
+
+        Met à jour à la fois les angles de référence et les angles initiaux
+        du corps. Utilise la convention Euler XYZ (en radians).
+
+        :param angle: vecteur d'angles (theta_x, theta_y, theta_z) en radians
+        :type angle: numpy.ndarray
+        :return: None
+
+        :raises ValueError: si le vecteur d'angle n'est pas de forme (3,)
         """
         angle = np.asarray(angle)
         if angle.shape != (3,):
@@ -77,8 +156,13 @@ class MBSRigidBody3D:
         self._initial_angles = angle.copy()
 
     def ChangeInitialPosition(self, position : np.ndarray):
-        """
-        Défini la position initiale du corps dans le repère global
+        """Modifie la position initiale du corps.
+
+        :param position: vecteur position initiale (x, y, z) en coordonnées globales
+        :type position: numpy.ndarray
+        :return: None
+
+        :raises ValueError: si le vecteur position n'est pas de forme (3,)
         """
         position = np.asarray(position)
         if position.shape != (3,):
@@ -87,8 +171,13 @@ class MBSRigidBody3D:
         self._initial_position = position.copy()
 
     def ChangeInitialAngle(self, angle : np.ndarray):
-        """
-        Défini l'angle initial du corps dans le repère global
+        """Modifie les angles initiaux du corps (convention Euler XYZ).
+
+        :param angle: vecteur d'angles initiaux (theta_x, theta_y, theta_z) en radians
+        :type angle: numpy.ndarray
+        :return: None
+
+        :raises ValueError: si le vecteur d'angle n'est pas de forme (3,)
         """
         angle = np.asarray(angle)
         if angle.shape != (3,):
@@ -99,10 +188,22 @@ class MBSRigidBody3D:
 
 
     def GetBodyLocalCoords(self, global_point):
-        """
-        Relocalise un point en coordonnées ref en coordonnées locales du corps
-        Applique la transformation
-            x_local = invRotation @ (xglobal - x_cdg(ref))
+        """Convertit un point des coordonnées globales aux coordonnées locales du corps.
+
+        Applique la transformation inverse de rotation :
+
+        .. math::
+
+            \\mathbf{x}_{local} = R^{-1} (\\mathbf{x}_{global} - \\mathbf{x}_{ref})
+
+        où :math:`R` est la matrice de rotation du corps.
+
+        :param global_point: point en coordonnées globales (vecteur 3D)
+        :type global_point: numpy.ndarray
+        :return: point en coordonnées locales du corps
+        :rtype: numpy.ndarray
+
+        :raises ValueError: si global_point n'est pas un vecteur 3D
         """
         global_point = np.asarray(global_point)
         if global_point.shape != (3,):
@@ -111,10 +212,23 @@ class MBSRigidBody3D:
         return np.linalg.solve(R, global_point - self._referencePosition)
 
     def GetBodyGlobalCoords(self, local_point):
-        """
-        Relocalise un point en coordonnées locales du corps en coordonnées du référentiel
-        Applique la transformation
-            x_ref = x_cdg(ref) + Rotation @ x_local
+        """Convertit un point des coordonnées locales du corps aux coordonnées globales.
+
+        Applique la transformation de rotation :
+
+        .. math::
+
+            \\mathbf{x}_{global} = \\mathbf{x}_{ref} + R \\mathbf{x}_{local}
+
+        où :math:`R` est la matrice de rotation du corps et :math:`\\mathbf{x}_{ref}`
+        est la position du centre de masse.
+
+        :param local_point: point en coordonnées locales du corps (vecteur 3D)
+        :type local_point: numpy.ndarray
+        :return: point en coordonnées globales
+        :rtype: numpy.ndarray
+
+        :raises ValueError: si local_point n'est pas un vecteur 3D
         """
         local_point = np.asarray(local_point)
         if local_point.shape != (3,):
@@ -124,10 +238,23 @@ class MBSRigidBody3D:
         return self._referencePosition + R @ local_point
 
     def GetBodyGlobalVector(self, local_vector):
-        """
-        Transforme un vecteur dans les coordonnées locales d'un corps vers le référentiel
-        Applique la transformation
-            v_ref = Rotation @ v_local
+        """Transforme un vecteur des coordonnées locales aux coordonnées globales.
+
+        Cette méthode applique uniquement la rotation sans translation, ce qui
+        est approprié pour les vecteurs (contrairement aux points).
+
+        .. math::
+
+            \\mathbf{v}_{global} = R \\mathbf{v}_{local}
+
+        où :math:`R` est la matrice de rotation du corps.
+
+        :param local_vector: vecteur en coordonnées locales du corps (vecteur 3D)
+        :type local_vector: numpy.ndarray
+        :return: vecteur en coordonnées globales
+        :rtype: numpy.ndarray
+
+        :raises ValueError: si local_vector n'est pas un vecteur 3D
         """
         local_vector = np.array(local_vector)
         if local_vector.shape != (3,):
@@ -135,15 +262,47 @@ class MBSRigidBody3D:
         R = RotationMatrix(*self._refAngles)
         return R @ local_vector
 
-class MBSReferenceBody3D(MBSRigidBody3D) :
+class MBSReferenceBody3D(MBSRigidBody3D):
+    """Corps de référence fixe avec cinématique imposée.
 
-    def __init__(self,name):
+    Un corps de référence est un corps fixe (immobile) auquel on peut imposer
+    une cinématique arbitraire via des fonctions du temps. Contrairement aux
+    corps rigides ordinaires, sa position et sa rotation sont entièrement
+    contrôlées par les fonctions d'entrée et ne sont pas affectées par les
+    forces de liaison.
 
-        super().__init__(name,mass=0.,
-                              inertia_tensor=0.)
+    Cette classe est typiquement utilisée pour modéliser des excitations
+    imposées (par exemple, un moteur, une table vibrante, etc.).
+
+    Paramètres du constructeur (:class:`__init__`):
+
+    :param name: nom identifiant le corps de référence
+    :type name: str
+
+    Attributs:
+
+    :var _name: nom du corps
+    :var _mass: toujours 0 (corps fixe)
+    :var _inertia: toujours nulle (corps fixe)
+    :var _is_fixed: toujours True
+
+    Méthodes importantes:
+    - :meth:`SetDisplacementFunction` pour imposer le déplacement (translation).
+    - :meth:`SetRotationFunction` pour imposer la rotation.
+    - :meth:`_updateDisplacement` pour obtenir l'état cinématique au temps t.
+    """
+
+    def __init__(self, name: str):
+        """Initialise un corps de référence fixe.
+
+        :param name: nom identifiant le corps de référence
+        :type name: str
+        """
+        super().__init__(name, mass=0.,
+                         inertia_tensor=0.)
         self._is_fixed = True
 
-        self.__zero_func = lambda t : np.zeros_like(t, dtype=float)
+        self.__zero_func = lambda t: np.zeros_like(t, dtype=float)
 
         self.__dX_func = self.__zero_func
         self.__dY_func = self.__zero_func
@@ -166,39 +325,78 @@ class MBSReferenceBody3D(MBSRigidBody3D) :
                                  dx_func=None,
                                  dy_func=None,
                                  dz_func=None):
+        """Impose les fonctions de déplacement du corps de référence.
+
+        Défini les déplacements en translation selon X, Y et/ou Z en fonction
+        du temps. Les vitesses sont calculées numériquement par différence finie
+        (schéma centré d'ordre 2).
+
+        :param dx_func: fonction temps → déplacement selon X. Signature: ``dx_func(t) -> float``
+        :type dx_func: callable | None
+        :param dy_func: fonction temps → déplacement selon Y. Signature: ``dy_func(t) -> float``
+        :type dy_func: callable | None
+        :param dz_func: fonction temps → déplacement selon Z. Signature: ``dz_func(t) -> float``
+        :type dz_func: callable | None
+        :return: None
+        """
         dh = 1e-9
-        if dx_func is not None :
+        if dx_func is not None:
             self.__dX_func = dx_func
-            self.__VX_func = lambda t : (dx_func(t+dh) - dx_func(t-dh) ) / (2*dh)
+            self.__VX_func = lambda t: (dx_func(t + dh) - dx_func(t - dh)) / (2 * dh)
 
-        if dy_func is not None :
+        if dy_func is not None:
             self.__dY_func = dy_func
-            self.__VY_func = lambda t : (dy_func(t+dh) - dy_func(t-dh) ) / (2*dh)
+            self.__VY_func = lambda t: (dy_func(t + dh) - dy_func(t - dh)) / (2 * dh)
 
-        if dz_func is not None :
+        if dz_func is not None:
             self.__dZ_func = dz_func
-            self.__VZ_func = lambda t : (dz_func(t+dh) - dz_func(t-dh) ) / (2*dh)
+            self.__VZ_func = lambda t: (dz_func(t + dh) - dz_func(t - dh)) / (2 * dh)
 
 
-    def SetRotationFunction(self,dtheta_x_func=None,
+    def SetRotationFunction(self, dtheta_x_func=None,
                              dtheta_y_func=None,
                              dtheta_z_func=None):
+        """Impose les fonctions de rotation du corps de référence.
+
+        Défini les rotations (angles Euler XYZ) en fonction du temps.
+        Les vitesses angulaires (omega) sont calculées numériquement par
+        différence finie.
+
+        :param dtheta_x_func: fonction temps → rotation autour X (radians). Signature: ``dtheta_x_func(t) -> float``
+        :type dtheta_x_func: callable | None
+        :param dtheta_y_func: fonction temps → rotation autour Y (radians). Signature: ``dtheta_y_func(t) -> float``
+        :type dtheta_y_func: callable | None
+        :param dtheta_z_func: fonction temps → rotation autour Z (radians). Signature: ``dtheta_z_func(t) -> float``
+        :type dtheta_z_func: callable | None
+        :return: None
+        """
         dh = 1e-9
-        if dtheta_x_func is not None :
+        if dtheta_x_func is not None:
             self.__dthetaX_func = dtheta_x_func
-            self._omegaX_func = lambda t : (dtheta_x_func(t+dh) - dtheta_x_func(t-dh) ) / (2*dh)
+            self._omegaX_func = lambda t: (dtheta_x_func(t + dh) - dtheta_x_func(t - dh)) / (2 * dh)
 
-        if dtheta_y_func is not None :
+        if dtheta_y_func is not None:
             self.__dthetaY_func = dtheta_y_func
-            self.__domegaY_func = lambda t : (dtheta_y_func(t+dh) - dtheta_y_func(t-dh) ) / (2*dh)
+            self.__domegaY_func = lambda t: (dtheta_y_func(t + dh) - dtheta_y_func(t - dh)) / (2 * dh)
 
-        if dtheta_z_func is not None :
+        if dtheta_z_func is not None:
             self.__dthetaZ_func = dtheta_z_func
-            self._omegaZ_func = lambda t : (dtheta_z_func(t+dh) - dtheta_z_func(t-dh) ) / (2*dh)
+            self._omegaZ_func = lambda t: (dtheta_z_func(t + dh) - dtheta_z_func(t - dh)) / (2 * dh)
 
 
-    def _updateDisplacement(self,t):
+    def _updateDisplacement(self, t):
+        """Retourne l'état cinématique complet du corps de référence au temps t.
 
+        Récupère tous les déplacements, angles et vitesses imposés à partir
+        des fonctions définies par :meth:`SetDisplacementFunction` et
+        :meth:`SetRotationFunction`.
+
+        :param t: temps
+        :type t: float
+        :return: vecteur d'état [dx, dy, dz, dtheta_x, dtheta_y, dtheta_z,
+                 vx, vy, vz, omega_x, omega_y, omega_z]
+        :rtype: numpy.ndarray
+        """
         return np.array([
             self.__dX_func(t),
             self.__dY_func(t),
@@ -215,10 +413,26 @@ class MBSReferenceBody3D(MBSRigidBody3D) :
         ])
 
     def ChangeInitialPosition(self, *args, **kwargs):
+        """Surcharge pour empêcher la modification de position initiale.
+
+        Les corps de référence ont leur cinématique imposée ; modifier la
+        position initiale n'aurait aucun effet. Cette méthode affiche un
+        message d'avertissement.
+
+        :return: None
+        """
         print("Changer la position initiale d'un corps de référence n'est pas possible. "
               "Cette commande n'a pas d'effet.")
 
     def ChangeInitialAngle(self, *args, **kwargs):
+        """Surcharge pour empêcher la modification des angles initiaux.
+
+        Les corps de référence ont leur cinématique imposée ; modifier les
+        angles initiaux n'aurait aucun effet. Cette méthode affiche un
+        message d'avertissement.
+
+        :return: None
+        """
         print("Changer l'angle initial d'un corps de référence n'est pas possible. "
               "Cette commande n'a pas d'effet.")
 
