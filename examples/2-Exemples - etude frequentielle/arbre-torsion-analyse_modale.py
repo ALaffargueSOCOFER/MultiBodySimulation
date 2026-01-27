@@ -59,7 +59,7 @@ for f in np.sort(natural_freq_theorique) :
 
 ## Etude avec MultibodySimulation
 import sys,socofer
-sys.path.append(socofer.devpy_ala_path)
+sys.path.append(socofer.lib_socofer_path)
 from MultiBodySimulation.MBSBody import MBSRigidBody3D,MBSReferenceBody3D
 from MultiBodySimulation.MBSMechanicalJoint import (MBSLinkLinearSpringDamper,
 MBSLinkKinematic)
@@ -117,7 +117,6 @@ mecha_sys.AddLinkage(joint01)
 mecha_sys.AddLinkage(joint12)
 mecha_sys.AddLinkage(joint23)
 
-t_mbs, results = mecha_sys.RunDynamicSimulation(t_span, dt)
 
 natural_freq = mecha_sys.ComputeNaturalFrequencies(sort_values=True,
                                                     drop_zeros=True)
@@ -133,12 +132,6 @@ mbs_modal_result = mecha_sys.ComputeModalAnalysis(sort_values = True,
 modal_result_dict = mbs_modal_result.GetDisplacementsByBodies()
 freq_vector_mbs = mbs_modal_result.GetNaturalFrequencies()
 
-
-freqres = mecha_sys.ComputeFrequencyDomainResponse([
-            ("Ref", 3, "Masse 1", 3),
-            ("Ref", 3, "Masse 2", 3),
-            ("Ref", 3, "Masse 3", 3),
-                        ])
 
 
 print("=" * 40)
@@ -165,6 +158,9 @@ ax.set(title="Déplacements des modes propres",
        xlabel = "Fréquence [Hz]",
        ylabel = "Angle [°]")
 
+ax.legend()
 
+if __name__ == "__main__" :
+    fig.savefig("analyse_modale.png")
 plt.show()
 

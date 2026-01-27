@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 
 import sys, socofer
-sys.path.append(socofer.devpy_ala_path)
+sys.path.append(socofer.lib_socofer_path)
 
 
 # Paramètres physiques

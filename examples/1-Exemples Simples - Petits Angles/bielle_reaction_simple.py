@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from scipy.integrate import solve_ivp
 
 import sys, socofer
-sys.path.append(socofer.devpy_ala_path)
+sys.path.append(socofer.lib_socofer_path)
 
 from MultiBodySimulation.MBSBody import MBSRigidBody3D, MBSReferenceBody3D
 from MultiBodySimulation.MBSMechanicalJoint import (MBSLinkLinearSpringDamper,
@@ -184,7 +184,7 @@ fig, axes = plt.subplots(3,1, figsize=(7, 7))
 
 # Graphique 1 : Angle θ(t)
 axes[0].plot(t_eval, np.rad2deg(theta_scipy_ode), 'g-',
-                label='Scipy ODE', linewidth=2.0)
+                label='Scipy ODE - largeAngles', linewidth=2.0)
 axes[0].plot(t_mbs, np.rad2deg(theta_mbs), 'r-',
                 label='MBS', linewidth=1)
 axes[0].set_xlabel('Temps [s]')
@@ -195,7 +195,7 @@ axes[0].grid(True)
 
 # Graphique 2 : Position Y de l'extrémité
 axes[1].plot(t_eval, y_ext_scipy_ode * 1000, 'g-',
-                label='Scipy ODE', linewidth=2.0)
+                label='Scipy ODE - largeAngles', linewidth=2.0)
 axes[1].plot(t_eval, y_ext_scipy_smallAngles * 1000, 'b-',
                 label='Scipy ODE - smallAngles', linewidth=2.0)
 axes[1].plot(t_mbs, y_ext_mbs * 1000, 'r-',
@@ -208,7 +208,7 @@ axes[1].grid(True)
 
 # Graphique 2 : Position X de l'extrémité
 axes[2].plot(t_eval, x_ext_scipy_ode * 1000, 'g-',
-                label='Scipy ODE', linewidth=2.0)
+                label='Scipy ODE - largeAngles', linewidth=2.0)
 axes[2].plot(t_eval, x_ext_scipy_smallAngles * 1000, 'b-',
                 label='Scipy ODE - smallAngles', linewidth=2.0)
 axes[2].plot(t_mbs, x_ext_mbs * 1000, 'r-',
@@ -220,4 +220,6 @@ axes[2].legend()
 axes[2].grid(True)
 
 plt.tight_layout()
-plt.show()
+if __name__ == "__main__" :
+    plt.savefig("bielle_reaction.png")
+    plt.show()

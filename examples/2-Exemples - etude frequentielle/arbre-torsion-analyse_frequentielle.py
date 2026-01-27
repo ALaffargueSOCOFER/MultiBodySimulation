@@ -54,8 +54,8 @@ for f in np.sort(natural_freq_theorique) :
     print(f">> f = {f:.5e} Hz")
 
 ## Etude avec MultibodySimulation
-import sys
-sys.path.append("../..")
+import sys, socofer
+sys.path.append(socofer.lib_socofer_path)
 from MultiBodySimulation.MBSBody import MBSRigidBody3D,MBSReferenceBody3D
 from MultiBodySimulation.MBSMechanicalJoint import (MBSLinkLinearSpringDamper,)
 from MultiBodySimulation.MBSMechanicalSystem import MBSLinearSystem
@@ -140,23 +140,30 @@ plt.subplot(311)
 plt.loglog(G.frequency, G.module, label = G.names)
 for w0 in freqres.GetNaturalFrequencies() :
     plt.axvline(w0, color = "grey")
+plt.title("Réponse 'Amplitude'")
+plt.ylabel(r"$|H(\omega)|$")
 plt.legend()
 plt.grid(True)
 
 plt.subplot(312)
+plt.title("Réponse 'Phase'")
 plt.semilogx(G.frequency, G.phase, label = G.names)
 for w0 in freqres.GetNaturalFrequencies() :
     plt.axvline(w0, color = "grey")
-plt.legend()
+plt.ylabel(r"$\phi_(H) (\omega)$ [°]")
 plt.grid(True)
 
 plt.subplot(313)
+plt.title("Réponse 'Power Spectral Density'")
 plt.loglog(G.frequency, G.powerSpectralDensity, label = G.names)
 for w0 in freqres.GetNaturalFrequencies() :
     plt.axvline(w0, color = "grey")
-plt.legend()
+plt.ylabel(r"$PSD_(H) (\omega)|$")
 plt.grid(True)
 
+plt.xlabel("Freq (Hz)")
 plt.tight_layout()
+if __name__ == "__main__" :
+    plt.savefig("freq_response.png")
 plt.show()
 

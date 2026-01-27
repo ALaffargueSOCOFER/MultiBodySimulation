@@ -69,7 +69,7 @@ t_scipy = sol.t
 
 ## Etude avec MultibodySimulation
 import sys,socofer
-sys.path.append(socofer.devpy_ala_path)
+sys.path.append(socofer.lib_socofer_path)
 from MultiBodySimulation.MBSBody import MBSRigidBody3D,MBSReferenceBody3D
 from MultiBodySimulation.MBSMechanicalJoint import MBSLinkLinearSpringDamper
 from MultiBodySimulation.MBSMechanicalSystem import MBSLinearSystem
@@ -167,7 +167,23 @@ plt.legend()
 plt.grid()
 
 plt.tight_layout()
+if __name__ == "__main__" :
+    plt.savefig("arbre_torsion.png")
+
+
+plt.figure()
+plt.plot(t_mbs, theta1_mbs * 180/np.pi, label=r"$\Theta_1$")
+plt.plot(t_mbs, theta2_mbs * 180/np.pi, label=r"$\Theta_2$")
+plt.plot(t_mbs, theta3_mbs * 180/np.pi, label=r"$\Theta_3$")
+plt.xlabel("Temps [s]")
+plt.ylabel(r"Angle $\theta$ [°]")
+plt.title(r"Barre en torsion")
+plt.legend()
+plt.grid()
+plt.tight_layout()
+
 plt.show()
+
 
 
 
