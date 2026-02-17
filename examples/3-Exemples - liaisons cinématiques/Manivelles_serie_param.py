@@ -14,7 +14,7 @@ from MultiBodySimulation.MBSMechanicalSystem import MBSLinearSystem
 # ============================================================
 # PARAMÈTRES PHYSIQUES ET GÉOMÉTRIQUES
 # ============================================================
-kinematic_tolerance = 1e-7
+kinematic_tolerance = 1e-6
 # Géométrie des manivelles
 L1_b1 = 0.10  # Longueur bras 1 de la manivelle 1 [m]
 L2_b1 = 0.15  # Longueur bras 2 de la manivelle 1 [m]

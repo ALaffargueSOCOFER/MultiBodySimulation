@@ -5,6 +5,7 @@ import pypardiso
 from scipy.sparse import csc_matrix, eye, bmat
 from scipy.integrate import solve_ivp
 from scipy.linalg import solve as lin_solver
+from scipy.sparse.linalg import lgmres
 
 pypardiso_installed = False
 try :
@@ -512,16 +513,14 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
     """
 
     def __init__(self, system: 'MBSLinearSystem',
-                 constraint_tolerance: float = 1e-8,
-                 atol: float = 1e-5,
-                 tol: float =1e-5,
-                 maxInnerIter: int = 100,
+                 atol: float = 1e-6,
+                 tol: float =1e-6,
+                 maxInnerIter: int = 15,
                  inner_atol = 1e-8,
                  inner_tol = 1e-8,):
 
         super().__init__(system)
 
-        self.constraint_tolerance = float(constraint_tolerance)
         self.inner_atol = float(inner_atol)
         self.inner_tol = float(inner_tol)
         self.atol = float(atol)
@@ -574,6 +573,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
               max_angle_threshold: Optional[float] = None,
               adaptative = False,
               stabilization_method: (str,None) = "Lagrangian",
+              print_iter = False,
               ) -> tuple:
         """
         Intégration avec scipy.solve_ivp.
@@ -653,27 +653,51 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
 
             tnp1 = min(tn + dh, t_span[1])
 
-            if adaptative:
-                Dy_predict = self._RK2_step(tnp1, tn, Dy_n, Dyfixed[:,i])
+            if tm is not None:
+                Dy_predict = Dy_n + (tnp1-tn)/(tn-tm) * (Dy_n - Dy_m)
             else :
-                Dy_predict = Dy_n[:]
+                Dy_predict = Dy_n
 
-            if self.ncons > 0 and stabilization_method == "Lagrangian" :
+
+            if self.ncons > 0 and stabilization_method == "Lagrangian":
                 Dynp1, Dyfixed_np1, Flambda_n = self._BDF2_Lagrangian(tnp1,
                                                                       tn,
                                                                       tm,
                                                                       Dy_predict,
                                                                       Dy_n,
                                                                       Dy_m,
-                                                                      Flambda_n)
+                                                                      Flambda_n,
+                                                                      print_iter=print_iter,
+                                                                      max_iter=self.maxIter)
+            elif self.ncons > 0 and stabilization_method == "SmoothLagrangian" :
+                Dynp1, Dyfixed_np1 = self._BDF2_step(tnp1,
+                                                     tn,
+                                                     tm,
+                                                     Dy_predict,
+                                                     Dy_n,
+                                                     Dy_m,
+                                                     print_iter=False,
+                                                     max_iter=self.maxIter)
+                Dynp1, Dyfixed_np1, Flambda_n = self._BDF2_Lagrangian(tnp1,
+                                                              tn,
+                                                              tm,
+                                                              Dynp1,
+                                                              Dy_n,
+                                                              Dy_m,
+                                                              Flambda_n,
+                                                              Dyfixed_np1,
+                                                              print_iter = print_iter,
+                                                              max_iter=10)
 
             else :
                 Dynp1, Dyfixed_np1 = self._BDF2_step(tnp1,
                                                  tn,
                                                  tm,
+                                                 Dy_predict,
                                                  Dy_n,
-                                                 Dy_n,
-                                                 Dy_m)
+                                                 Dy_m,
+                                              print_iter = print_iter,
+                                              max_iter=self.maxIter)
 
             err_old = err
             err = np.linalg.norm(Dynp1 - Dy_predict) / (self.atol + self.tol * np.linalg.norm(Dynp1))
@@ -711,7 +735,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         return t_eval, results
 
 
-    def compute_forces(self, t: float, Uvec: np.ndarray, Vvec: np.ndarray,
+    def compute_forces(self, Uvec: np.ndarray, Vvec: np.ndarray,
                        Ufixed: np.ndarray, Vfixed: np.ndarray) -> np.ndarray:
         """
         Calcule les forces non-liénaire + gap appliquées aux corps libres.
@@ -751,34 +775,10 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
 
         return F
 
-
-    def _RK2_step(self,tnp1: float, tn: float,
-                  Dy_n: np.ndarray,Dyfixed_n : np.ndarray):
-
-        # États des corps fixes
-        nref = 6* self.system._nrefbodies
-        Un_fixed = Dyfixed_n[:nref]
-        Vn_fixed = Dyfixed_n[nref:]
-
-        # États des corps libres
-        n = 6 * self.system._nbodies
-        Un = Dy_n[:n]
-        Vn = Dy_n[n:]
-
-        dh = tnp1 - tn
-
-        Fn = self.compute_forces(tn, Un, Vn, Un_fixed, Vn_fixed)
-        Dyn_tilda = Dy_n + dh/2 *( self._Jac_linear @ Dy_n + self.bF_linear @ Fn )
-
-        Dyfixed_tilda = self.system._get_fixedBodies_displacement_state(tn + dh/2)
-        Ftilda = self.compute_forces(tn, Dyn_tilda[:n], Dyn_tilda[n:], Dyfixed_tilda[:nref], Dyfixed_tilda[nref:])
-
-        Dynp1 = Dy_n + dh *( self._Jac_linear @ Dyn_tilda + self.bF_linear @ Ftilda )
-
-        return Dynp1
-
     def _BDF2_step(self,tnp1: float, tn: float, tm: float,
-                   Dy: np.ndarray, Dy_n: np.ndarray, Dy_m: np.ndarray) :
+                   Dy: np.ndarray, Dy_n: np.ndarray, Dy_m: np.ndarray,
+                   print_iter = False,
+                   max_iter: int = 100,) :
         # États des corps fixes
         Dyfixed = self.system._get_fixedBodies_displacement_state(tnp1)
         Ufixed = Dyfixed[:6 * self.system._nrefbodies]
@@ -793,7 +793,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         alpha, beta_n, beta_m =  compute_bdf2_coefficients(tnp1, tn, tm)
         #x_next = alpha * f(..) + beta
         Bvec = Dy_n * beta_n + Dy_m * beta_m
-        Fnp1 = self.compute_forces(tnp1, Uvec, Vvec, Ufixed, Vfixed)
+        Fnp1 = self.compute_forces(Uvec, Vvec, Ufixed, Vfixed)
         Amat = eye(2 * n, format = "csc") - alpha * self._Jac_linear
 
         b = alpha * self.bF_linear @ Fnp1 + Bvec
@@ -804,26 +804,31 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         res = np.linalg.norm(r / scale) / (self.inner_atol + tol)
 
         iter = 0
-        while res > 1.0 and iter < self.maxIter  :
+        while res > 1.0 and iter < max_iter  :
             iter += 1
 
             Dy = linearSolver(Amat, b)
 
             Uvec = Dy[:n]
             Vvec = Dy[n:]
-            Fnp1 = self.compute_forces(tnp1, Uvec, Vvec, Ufixed, Vfixed)
+            Fnp1 = self.compute_forces(Uvec, Vvec, Ufixed, Vfixed)
             b = alpha * self.bF_linear @ Fnp1 + Bvec
             r = Amat @ Dy - b
             res = np.linalg.norm(r / scale) / (self.inner_atol + tol)
 
-        print(f"time = {tnp1}, iter = {iter}, res = {res}")
+        if print_iter :
+            print(f"time = {tnp1:.3f}, iter = {iter}, res = {res:.3e}")
         return Dy, Dyfixed
 
     def _BDF2_Lagrangian(self, tnp1: float, tn: float, tm: float,
                          Dy: np.ndarray, Dy_n: np.ndarray, Dy_m: np.ndarray,
-                         Flambda_n) :
+                         Flambda_n : np.ndarray,
+                         Dyfixed : np.ndarray= None,
+                         print_iter = False,
+                         max_iter:int = 100,) :
         # États des corps fixes
-        Dyfixed = self.system._get_fixedBodies_displacement_state(tnp1)
+        if Dyfixed is None :
+            Dyfixed = self.system._get_fixedBodies_displacement_state(tnp1)
         nref = 6 * self.system._nrefbodies
         Ufixed = Dyfixed[:nref]
         Vfixed = Dyfixed[nref:]
@@ -837,7 +842,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         alpha, beta_n, beta_m =  compute_bdf2_coefficients(tnp1, tn, tm)
         #x_next = alpha * f(..) + beta
         Bvec = Dy_n * beta_n + Dy_m * beta_m
-        Fnp1 = self.compute_forces(tnp1, Uvec, Vvec, Ufixed, Vfixed)
+        Fnp1 = self.compute_forces(Uvec, Vvec, Ufixed, Vfixed)
         Amat_lin = eye(2 * n, format = "csc") - alpha * self._Jac_linear
 
         Amat = bmat([[Amat_lin, alpha * self.Jkin_f.T],
@@ -856,17 +861,17 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         scale = np.maximum( np.abs(Dz), 1.0)
         tol = self.inner_tol * np.linalg.norm(Dz / scale)
         res = np.linalg.norm(r / scale) / (self.inner_atol + tol)
-
+        dx = 0.
 
         iter = 0
-        while res > 1.0 and iter < self.maxIter  :
+        while res > 1.0 and iter < max_iter  :
             iter += 1
 
             Dz = linearSolver(Amat, b)
 
             Uvec = Dz[:n]
             Vvec = Dz[n:2*n]
-            Fnp1 = self.compute_forces(tnp1, Uvec, Vvec, Ufixed, Vfixed)
+            Fnp1 = self.compute_forces(Uvec, Vvec, Ufixed, Vfixed)
             bDyn = alpha * self.bF_linear @ Fnp1 + Bvec
             b[:2*n] = bDyn
             r = Amat @ Dz - b
@@ -880,8 +885,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         Dy = Dz[:2*n]
         Flambda_n = Dz[2*n:]
 
-
+        if print_iter :
+            print(f"time = {tnp1:.3f}, iter = {iter}, res = {res:.3e}")
 
         return Dy, Dyfixed, Flambda_n
-
-

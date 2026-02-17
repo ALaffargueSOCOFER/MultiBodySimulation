@@ -439,7 +439,7 @@ class MBSLinearSystem(__MBSBase):
 
 
         # Cinématique
-        Kmat_kin = self._Kmat_kinematic_penal[self._freedof]
+        Kmat_kin = self._invMff @ (self._Kmat_kinematic_penal[self._freedof])
         positive_rows = (np.abs(Kmat_kin) > 0).any(axis=1)
         self._Kkin_f = Kmat_kin[positive_rows][:, self._freedof]
         self._Kkin_b = Kmat_kin[positive_rows][:, self._fixeddof]

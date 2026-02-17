@@ -11,7 +11,7 @@ from MultiBodySimulation.MBSMechanicalJoint import MBSLinkLinearSpringDamper, MB
 from MultiBodySimulation.MBSMechanicalSystem import MBSLinearSystem
 
 
-kinematic_tolerance = 1e-5
+kinematic_tolerance = 1e-3
 
 
 Lx_loco = 16.0 # Longueur totale

@@ -66,6 +66,7 @@ t1 = time.time()
 t_eval, results = mecha_sys.RunDynamicSimulation(t_span=[0, simu_duration],
                                                  dt=1e-3,
                                                  solver_type="constraint_stabilized",
+                                                 stabilization_method="Lagrangian",
                                 )
 t2 = time.time()
 print("Elapsed time: ", t2-t1)
