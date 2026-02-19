@@ -1160,7 +1160,7 @@ class MBSLinearSystem(__MBSBase):
             self.AssemblyMatrixSystem()
 
         if not self._check_linearity() :
-            raise ValueError("Le système n'est pas totalement linéaire. "
+            warnings.warn("Le système n'est pas totalement linéaire. "
                              "Le système comporte des liaisons non linéaires ou "
                              "des liaisons de contact avec jeu. "
                              "L'analyse des degrés de liberté non contraints risque d'être faussé")

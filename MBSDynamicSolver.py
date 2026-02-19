@@ -106,6 +106,7 @@ class MBSDynamicSolver:
         du = (self.system._Qgap_f @ u + self.system._Qgap_b @ ub)
         dv = (self.system._Qgap_f @ v + self.system._Qgap_b @ vb)
 
+
         du_viol = (np.maximum(0., du - self.system._gapPlus) +
                    np.minimum(0., du - self.system._gapMinus))
         dv_viol = dv * (np.abs(du_viol) > 0.)
@@ -863,7 +864,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         Dy_prev = Dy[:]
 
         iter = 0
-        while (res > 1.0 and iter < max_iter) or iter<=0  :
+        while (res > 1.0 and iter < max_iter) : #or iter<=0  :
             iter += 1
 
             Jgap = self.compute_gap_jacobian(Dy, Dyfixed)
@@ -932,9 +933,16 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
         tol = self.inner_tol * np.linalg.norm(Dz / scale)
         res = np.linalg.norm(r / scale) / (self.inner_atol + tol)
 
+        rcons = self.Jkin_f @ Dy - bCons
+
+        scale_cons = np.maximum( np.abs(bCons), 1.0)
+        tol = self.inner_tol * np.linalg.norm(bCons / scale_cons)
+        res_cons = np.linalg.norm(rcons / scale_cons) / (self.inner_atol + tol)
+
+        res = max(res, res_cons)
 
         iter = 0
-        while (res > 1.0 and iter < max_iter) or iter <= 0  :
+        while (res > 1.0 and iter < max_iter) :#or iter <= 0  :
             iter += 1
 
             Dz = linearSolver(Amat, b)
@@ -1014,7 +1022,15 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
 
         iter = 0
         max_iter = max(2, self.maxIter)
-        while (res > 1.0 and iter < max_iter) or iter <= 0 :
+
+        rcons = self.Jkin_f @ Dy - bCons
+
+        scale_cons = np.maximum(np.abs(bCons), 1.0)
+        tol = self.inner_tol * np.linalg.norm(bCons / scale_cons)
+        res_cons = np.linalg.norm(rcons / scale_cons) / (self.inner_atol + tol)
+
+        res = max(res, res_cons)
+        while (res > 1.0 and iter < max_iter) : # or iter <= 0 :
             iter += 1
 
             Dy = linearSolver(Amat, b)
