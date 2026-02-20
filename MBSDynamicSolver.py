@@ -740,8 +740,9 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
             i += 1
             if adaptative:
                 dhmin = dt * 0.1
+                dhmax = dt * 10
                 dh = pi_step_controller(dh, err, err_old)
-                dh = np.clip(dh, dhmin, dt)
+                dh = np.clip(dh, dhmin, dhmax)
 
 
         # Vérification finale
@@ -868,7 +869,7 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
             iter += 1
 
             Jgap = self.compute_gap_jacobian(Dy, Dyfixed)
-            Jsys = Amat + Jgap
+            Jsys = Amat + alpha * Jgap
             Dy = linearSolver(Jsys, -r) + Dy
 
             Uvec = Dy[:n]
@@ -954,9 +955,6 @@ class MBSConstraintStabilizedSolver(MBSDynamicSolver):
             Fnp1 = self.compute_forces(Uvec, Vvec, Ufixed, Vfixed)
             bDyn = alpha * self.bF_linear @ Fnp1 + Bvec
             b[:2*n] = bDyn
-
-            Dy = linearSolver(Amat_lin, bDyn - self.Jkin_f.T @ Flambda_n)
-            Dz[:2 * n] = Dy
 
             r = Amat @ Dz - b
 

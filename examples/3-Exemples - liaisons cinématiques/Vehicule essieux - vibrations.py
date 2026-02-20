@@ -10,7 +10,7 @@ from Vehicle_essieux_parametrage import prepare_study
 
 from vibrationSignalPSD import psd2time, compute_PSD, build_PSD_61373_amplitudes
 
-simu_duration = 0.5 # s
+simu_duration = 5.0 # s
 f1 = 10
 fstart = 20
 fend = 100
@@ -18,31 +18,26 @@ f2 = 200
 asd_amp = 8.74
 dt = 5e-4
 
-include_butee = True
-e_butee = 2e-3
-
 algo1 = "constraint_stabilized"
 algo2 = "constraint_stabilized"
 
 method1 = ""
-method2 = "Lagrange"
+method2 = "Lagrangian"
 
 label1 = "BDF2 - pénalisation"
 label2 = "BDF2 - Lagrange"
 
 tol1 = 1e-6
-tol2 = 1000
+tol2 = 100
 
-adaptative = True
+adaptative = False
 
 
 
 (mecha_sys,
  excitation_roue_11,excitation_roue_12,
  excitation_roue_21, excitation_roue_22,
- boite_11) = prepare_study(tol1,
-                           include_butee = include_butee,
-                           e_butee=e_butee,)
+ boite_11) = prepare_study(tol1)
 
 psd_func = build_PSD_61373_amplitudes(asd_amp, fstart, fend)
 spec = np.array([[f1,  psd_func(f1)],
@@ -74,8 +69,8 @@ def generate_61373_sig():
 
 
 dz_func_11 = generate_61373_sig()
-dz_func_12 = generate_61373_sig()
 dz_func_21 = generate_61373_sig()
+dz_func_12 = generate_61373_sig()
 dz_func_22 = generate_61373_sig()
 
 excitation_roue_11.SetDisplacementFunction(dz_func = dz_func_11)
@@ -103,9 +98,7 @@ t1 = time.time()
 (mecha_sys,
  excitation_roue_11,excitation_roue_12,
  excitation_roue_21, excitation_roue_22,
- boite_11) = prepare_study(tol2,
-                           include_butee = include_butee,
-                           e_butee=e_butee,)
+ boite_11) = prepare_study(tol2)
 
 excitation_roue_11.SetDisplacementFunction(dz_func = dz_func_11)
 excitation_roue_12.SetDisplacementFunction(dz_func = dz_func_12)
