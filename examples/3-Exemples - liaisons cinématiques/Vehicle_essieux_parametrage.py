@@ -132,6 +132,7 @@ def prepare_study(kinematic_tolerance = 1e-4):
                                     Ty = 1,Ry = 0,
                                     Tz = 1,Rz = 1,
                                       kinematic_tolerance = kinematic_tolerance)
+    pivot_boite_11.SetPostProcess("pivot_boite_11")
 
 
     fixation_roue_11 = MBSLinkKinematic(excitation_roue_11,
@@ -159,7 +160,7 @@ def prepare_study(kinematic_tolerance = 1e-4):
                                     Tz = 1,
                                       kinematic_tolerance = kinematic_tolerance)
 
-
+    fixation_roue_11.SetPostProcess("fixation_roue_11")
 
     # Ressorts
     Kmat = [K_lat_spring, K_lat_spring, K_spring]

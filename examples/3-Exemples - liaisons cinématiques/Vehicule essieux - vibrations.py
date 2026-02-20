@@ -10,7 +10,7 @@ from Vehicle_essieux_parametrage import prepare_study
 
 from vibrationSignalPSD import psd2time, compute_PSD, build_PSD_61373_amplitudes
 
-simu_duration = 5.0 # s
+simu_duration = 0.1 # s
 f1 = 10
 fstart = 20
 fend = 100
@@ -282,6 +282,8 @@ for idx in range(3):
 
 plt.tight_layout()
 
+print(f"Déformation maximale pivot 11 - simu 1 >>> {np.abs(results["Linkage"]["pivot_boite_11"].deformations).max():.2e}")
+print(f"Déformation maximale pivot 11 - simu 2 >>> {np.abs(results_scipy["Linkage"]["pivot_boite_11"].deformations).max():.2e}")
 
 plt.figure()
 
